@@ -22,7 +22,7 @@ from backend.app.services.job_runner import (
     OUTPUT_ROOT, PDF_ROOT,
     run_translate_job, run_retry_job, run_refine_job,
 )
-from core.models import IMAGE_EXTENSIONS, read_json
+from core.models import IMAGE_EXTENSIONS, read_json, extract_page_text
 from core.refine import refine_single_page, OllamaConnectionError, OllamaModelError, OllamaError
 
 router = APIRouter(prefix="/api/chapters", tags=["chapters"])
@@ -204,7 +204,7 @@ async def get_chapter(name: str):
         orig_filename = Path(raw_file).name if raw_file else f"page-{page_no:03d}.jpg"
         tr_filename = Path(raw_tr).name if raw_tr else (orig_filename if tr.get("translated_file") else None)
 
-        orig_text = rf.get("original_text") or tr.get("thai") or tr.get("text") or None
+        orig_text = rf.get("original_text") or extract_page_text(tr) or None
         ref_text = rf.get("refined_text") or None
 
         pages.append({

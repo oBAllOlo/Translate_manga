@@ -3,6 +3,12 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { SeriesGroup } from "@/api/client";
 
+export interface ToastNotification {
+  id: string;
+  message: string;
+  type?: "success" | "info" | "error";
+}
+
 interface UIState {
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
@@ -20,6 +26,10 @@ interface UIState {
 
   isShortcutsModalOpen: boolean;
   setShortcutsModalOpen: (open: boolean) => void;
+
+  toast: ToastNotification | null;
+  showToast: (message: string, type?: "success" | "info" | "error") => void;
+  hideToast: () => void;
 
   // History: tracks recently read chapters for "Continue Reading"
   continueReading: {
@@ -63,6 +73,16 @@ export const useUIStore = create<UIState>()(
 
       isShortcutsModalOpen: false,
       setShortcutsModalOpen: (open) => set({ isShortcutsModalOpen: open }),
+
+      toast: null,
+      showToast: (message, type = "info") => {
+        const id = Math.random().toString(36).substring(2, 9);
+        set({ toast: { id, message, type } });
+        setTimeout(() => {
+          set((state) => (state.toast?.id === id ? { toast: null } : {}));
+        }, 3500);
+      },
+      hideToast: () => set({ toast: null }),
 
       continueReading: null,
       clearContinueReading: () => set({ continueReading: null }),

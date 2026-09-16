@@ -56,7 +56,7 @@ export default function ReaderPage() {
     autoNextChapter,
   } = useReaderStore();
 
-  const { setContinueReading, openJobModal } = useUIStore();
+  const { setContinueReading, openJobModal, showToast } = useUIStore();
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showHud, setShowHud] = useState(true);
@@ -110,6 +110,9 @@ export default function ReaderPage() {
       const res = await refineChapterPage(slug, currentPage, force);
       if (res.error) {
         setRefineError(res.error);
+        showToast(res.error, "error");
+      } else {
+        showToast(`ขัดเกลาสำนวนหน้า ${currentPage} สำเร็จแล้ว`, "success");
       }
       queryClient.setQueryData(["chapter", slug], (old: ChapterDetail | undefined) => {
         if (!old) return old;
@@ -130,7 +133,9 @@ export default function ReaderPage() {
         };
       });
     } catch (err: any) {
-      setRefineError(err.message || "เกิดข้อผิดพลาดในการขัดเกลาสำนวน");
+      const msg = err.message || "เกิดข้อผิดพลาดในการขัดเกลาสำนวน";
+      setRefineError(msg);
+      showToast(msg, "error");
     } finally {
       setIsRefiningPage(false);
     }
@@ -142,9 +147,9 @@ export default function ReaderPage() {
       await refineChapter(slug);
       queryClient.invalidateQueries({ queryKey: ["chapter", slug] });
       queryClient.invalidateQueries({ queryKey: ["chapters"] });
-      alert("เริ่มงานขัดเกลาทุกหน้าในเบื้องหลังแล้ว ติดตามความคืบหน้าได้ที่ Dashboard");
+      showToast("เริ่มงานขัดเกลาทุกหน้าในเบื้องหลังแล้ว ติดตามความคืบหน้าได้ที่ Dashboard", "success");
     } catch (err: any) {
-      alert("เกิดข้อผิดพลาด: " + err.message);
+      showToast("เกิดข้อผิดพลาด: " + err.message, "error");
     }
   };
 

@@ -24,7 +24,7 @@ import {
 
 export function ChapterDrawer({ onRefresh }: { onRefresh: () => void }) {
   const navigate = useNavigate();
-  const { selectedSeries, isSeriesDrawerOpen, closeSeriesDrawer } = useUIStore();
+  const { selectedSeries, isSeriesDrawerOpen, closeSeriesDrawer, showToast } = useUIStore();
   const [filter, setFilter] = useState<"all" | "translated" | "untranslated" | "failed">("all");
   const [search, setSearch] = useState("");
   const [batchLoading, setBatchLoading] = useState(false);
@@ -84,9 +84,10 @@ export function ChapterDrawer({ onRefresh }: { onRefresh: () => void }) {
           for (const ch of target) {
             await translateChapter(ch.name);
           }
+          showToast(`เริ่มแปล Google Lens ทั้งหมด ${target.length} ตอนแล้ว`, "success");
           onRefresh();
         } catch (err: any) {
-          alert("เกิดข้อผิดพลาด: " + err.message);
+          showToast("เกิดข้อผิดพลาด: " + err.message, "error");
         } finally {
           setBatchLoading(false);
         }
@@ -111,9 +112,10 @@ export function ChapterDrawer({ onRefresh }: { onRefresh: () => void }) {
           for (const ch of target) {
             await retryChapter(ch.name);
           }
+          showToast(`เริ่ม Retry ${target.length} ตอนแล้ว`, "success");
           onRefresh();
         } catch (err: any) {
-          alert("เกิดข้อผิดพลาด: " + err.message);
+          showToast("เกิดข้อผิดพลาด: " + err.message, "error");
         } finally {
           setBatchLoading(false);
         }
@@ -140,9 +142,10 @@ export function ChapterDrawer({ onRefresh }: { onRefresh: () => void }) {
           for (const ch of target) {
             await refineChapter(ch.name);
           }
+          showToast(`เริ่มงานขัดเกลาสำนวน AI ${target.length} ตอนแล้ว`, "success");
           onRefresh();
         } catch (err: any) {
-          alert("เกิดข้อผิดพลาด: " + err.message);
+          showToast("เกิดข้อผิดพลาด: " + err.message, "error");
         } finally {
           setBatchLoading(false);
         }
@@ -151,22 +154,33 @@ export function ChapterDrawer({ onRefresh }: { onRefresh: () => void }) {
   };
 
   const handleTranslateOne = async (ch: ChapterSummary) => {
-    await translateChapter(ch.name);
-    onRefresh();
+    try {
+      await translateChapter(ch.name);
+      showToast(`เริ่มแปลตอน "${ch.title || ch.name}" แล้ว`, "success");
+      onRefresh();
+    } catch (err: any) {
+      showToast("เกิดข้อผิดพลาด: " + err.message, "error");
+    }
   };
 
   const handleRefineOne = async (ch: ChapterSummary) => {
     try {
       await refineChapter(ch.name);
+      showToast(`เริ่มขัดเกลาสำนวนตอน "${ch.title || ch.name}" แล้ว`, "success");
       onRefresh();
     } catch (err: any) {
-      alert("เกิดข้อผิดพลาด: " + err.message);
+      showToast("เกิดข้อผิดพลาด: " + err.message, "error");
     }
   };
 
   const handleRetryOne = async (ch: ChapterSummary) => {
-    await retryChapter(ch.name);
-    onRefresh();
+    try {
+      await retryChapter(ch.name);
+      showToast(`เริ่ม Retry ตอน "${ch.title || ch.name}" แล้ว`, "success");
+      onRefresh();
+    } catch (err: any) {
+      showToast("เกิดข้อผิดพลาด: " + err.message, "error");
+    }
   };
 
   const handleDeleteOne = (ch: ChapterSummary) => {

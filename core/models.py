@@ -37,3 +37,11 @@ def write_json(path: Path, data) -> None:
     """Write *data* as pretty-printed JSON."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def extract_page_text(row: dict | None) -> str:
+    """Safely extract Thai/translated text from a translation row."""
+    if not isinstance(row, dict):
+        return ""
+    return str(row.get("thai") or row.get("text") or "").strip()
+

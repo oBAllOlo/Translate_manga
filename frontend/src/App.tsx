@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/api/client";
 import { AppLayout } from "@/components/layout/app-layout";
+import { ToastContainer } from "@/components/common/toast";
 import DashboardPage from "@/pages/dashboard";
 import LibraryPage from "@/pages/library";
 import ReaderPage from "@/pages/reader";
@@ -35,6 +36,7 @@ export default function App() {
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        <ToastContainer />
       </BrowserRouter>
     </QueryClientProvider>
   );

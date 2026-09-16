@@ -10,7 +10,7 @@ from typing import Callable, Any
 
 import httpx
 
-from core.models import read_json, write_json
+from core.models import read_json, write_json, extract_page_text
 
 logger = logging.getLogger(__name__)
 
@@ -196,7 +196,7 @@ async def refine_chapter_work_dir(
 
         for page_no in target_pages:
             lens_entry = lens_by_page.get(page_no, {})
-            original_text = lens_entry.get("thai") or lens_entry.get("text") or ""
+            original_text = extract_page_text(lens_entry)
 
             # Check cache
             cached_entry = refined_by_page.get(page_no)
