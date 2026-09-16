@@ -1,8 +1,8 @@
 /** Reader — Immersive Manga Experience with Hold-to-Peek, 3 Modes, Scrubber & Next Chapter Flow. */
 import { useEffect, useCallback, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { fetchChapter, fetchChapters, resolvePdfUrl } from "@/api/client";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { fetchChapter, fetchChapters, resolvePdfUrl, refineChapter, refineChapterPage, type ChapterDetail } from "@/api/client";
 import { useReaderStore, type ReaderMode } from "@/stores/reader-store";
 import { useUIStore } from "@/stores/ui-store";
 import {
@@ -27,6 +27,10 @@ import {
   FileDown,
   FileText,
   Paintbrush,
+  Loader2,
+  Copy,
+  Check,
+  Languages,
 } from "lucide-react";
 import TouchupModal from "@/components/TouchupModal";
 
@@ -62,6 +66,13 @@ export default function ReaderPage() {
   const [touchupPageNo, setTouchupPageNo] = useState(1);
   const [imgTimestamp, setImgTimestamp] = useState(Date.now());
 
+  const queryClient = useQueryClient();
+  const [isRefinePanelOpen, setIsRefinePanelOpen] = useState(false);
+  const [isRefiningPage, setIsRefiningPage] = useState(false);
+  const [refineError, setRefineError] = useState<string | null>(null);
+  const [copiedOriginal, setCopiedOriginal] = useState(false);
+  const [copiedRefined, setCopiedRefined] = useState(false);
+
   // Fullscreen toggle
   const toggleFullscreen = useCallback(() => {
     if (!document.fullscreenElement) {
@@ -89,6 +100,65 @@ export default function ReaderPage() {
 
   const pages = chapter?.pages ?? [];
   const totalPages = pages.length;
+  const currentPageInfo = pages[currentPage - 1];
+
+  const handleRefineCurrentPage = async (force = true) => {
+    if (!slug || !currentPage) return;
+    setIsRefiningPage(true);
+    setRefineError(null);
+    try {
+      const res = await refineChapterPage(slug, currentPage, force);
+      if (res.error) {
+        setRefineError(res.error);
+      }
+      queryClient.setQueryData(["chapter", slug], (old: ChapterDetail | undefined) => {
+        if (!old) return old;
+        const updatedPages = old.pages.map((p) => {
+          if (p.page === currentPage) {
+            return {
+              ...p,
+              original_text: res.original_text || p.original_text,
+              refined_text: res.refined_text,
+            };
+          }
+          return p;
+        });
+        return {
+          ...old,
+          has_refined: true,
+          pages: updatedPages,
+        };
+      });
+    } catch (err: any) {
+      setRefineError(err.message || "เกิดข้อผิดพลาดในการขัดเกลาสำนวน");
+    } finally {
+      setIsRefiningPage(false);
+    }
+  };
+
+  const handleRefineWholeChapter = async () => {
+    if (!slug) return;
+    try {
+      await refineChapter(slug);
+      queryClient.invalidateQueries({ queryKey: ["chapter", slug] });
+      queryClient.invalidateQueries({ queryKey: ["chapters"] });
+      alert("เริ่มงานขัดเกลาทุกหน้าในเบื้องหลังแล้ว ติดตามความคืบหน้าได้ที่ Dashboard");
+    } catch (err: any) {
+      alert("เกิดข้อผิดพลาด: " + err.message);
+    }
+  };
+
+  const handleCopy = (text: string, isRefined: boolean) => {
+    if (!text) return;
+    navigator.clipboard.writeText(text);
+    if (isRefined) {
+      setCopiedRefined(true);
+      setTimeout(() => setCopiedRefined(false), 2000);
+    } else {
+      setCopiedOriginal(true);
+      setTimeout(() => setCopiedOriginal(false), 2000);
+    }
+  };
 
   // Find next & previous chapters in same series
   let nextChapterSlug: string | null = null;
@@ -542,6 +612,24 @@ export default function ReaderPage() {
             <span className="hidden sm:inline">Touch-up</span>
           </button>
 
+          {/* AI Refine Comparison Panel Toggle */}
+          <button
+            id="btn-toggle-refine-panel"
+            onClick={() => setIsRefinePanelOpen(!isRefinePanelOpen)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all cursor-pointer shadow-sm ${
+              isRefinePanelOpen
+                ? "bg-fuchsia-600 text-white border-fuchsia-500 shadow-fuchsia-500/20"
+                : "bg-fuchsia-600/20 text-fuchsia-300 hover:bg-fuchsia-600 hover:text-white border-fuchsia-500/30"
+            }`}
+            title="เปิด/ปิด หน้าต่างเปรียบเทียบสำนวน AI (Ollama TranslateGemma)"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-fuchsia-400" />
+            <span className="hidden sm:inline">สำนวน AI</span>
+            {currentPageInfo?.refined_text && (
+              <span className="w-1.5 h-1.5 rounded-full bg-fuchsia-300 animate-pulse" />
+            )}
+          </button>
+
           {/* Fullscreen & Help */}
           <button
             onClick={toggleFullscreen}
@@ -561,13 +649,14 @@ export default function ReaderPage() {
         </div>
       </div>
 
-      {/* 2. Main Reader Canvas */}
-      <div
-        ref={canvasRef}
-        onScroll={handleCanvasScroll}
-        className="flex-1 overflow-y-auto overflow-x-hidden relative flex flex-col items-center justify-start p-2 sm:p-4"
-        style={{ scrollBehavior: "smooth" }}
-      >
+      {/* 2. Main Reader Canvas & AI Refine Comparison Panel */}
+      <div className="flex-1 flex overflow-hidden relative w-full">
+        <div
+          ref={canvasRef}
+          onScroll={handleCanvasScroll}
+          className="flex-1 overflow-y-auto overflow-x-hidden relative flex flex-col items-center justify-start p-2 sm:p-4"
+          style={{ scrollBehavior: "smooth" }}
+        >
         {/* Mode: Long Strip */}
         {mode === "long-strip" && (
           <div
@@ -735,6 +824,172 @@ export default function ReaderPage() {
               </div>
             )}
           </div>
+        )}
+        </div>
+
+        {/* AI Refine Comparison Side Panel */}
+        {isRefinePanelOpen && (
+          <aside className="w-80 sm:w-96 border-l border-border/80 bg-card/95 backdrop-blur-2xl flex flex-col h-full z-30 shadow-2xl shrink-0 animate-in slide-in-from-right duration-200">
+            {/* Header */}
+            <div className="p-4 border-b border-border/70 flex items-center justify-between gap-3 shrink-0 bg-secondary/30">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-fuchsia-500/15 text-fuchsia-400 flex items-center justify-center border border-fuchsia-500/25 shadow-sm">
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-foreground">เปรียบเทียบสำนวน AI</h3>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className="text-[11px] text-muted-foreground font-medium">
+                      หน้า {currentPage} จาก {totalPages}
+                    </span>
+                    {currentPageInfo?.refined_text && (
+                      <span className="px-1.5 py-0.2 rounded text-[10px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                        ขัดเกลาแล้ว
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsRefinePanelOpen(false)}
+                className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+                title="ปิดหน้าต่างเปรียบเทียบ"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Content Body */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {refineError && (
+                <div className="p-3 rounded-xl bg-destructive/15 border border-destructive/30 text-destructive text-xs space-y-1 animate-in fade-in">
+                  <div className="flex items-center gap-1.5 font-bold">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span>เกิดข้อผิดพลาด</span>
+                  </div>
+                  <p className="text-[11px] leading-relaxed opacity-90">{refineError}</p>
+                </div>
+              )}
+
+              {/* 1. Google Lens Original Text Card */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    <Languages className="w-3 h-3 text-cyan-400" />
+                    Google Lens (แปลดิบ)
+                  </span>
+                  {currentPageInfo?.original_text && (
+                    <button
+                      onClick={() => handleCopy(currentPageInfo.original_text!, false)}
+                      className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+                      title="คัดลอกข้อความ Lens"
+                    >
+                      {copiedOriginal ? (
+                        <>
+                          <Check className="w-3 h-3 text-emerald-400" />
+                          <span className="text-emerald-400">คัดลอกแล้ว</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3 h-3" />
+                          <span>คัดลอก</span>
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
+                <div className="p-3.5 rounded-xl bg-secondary/60 border border-border/70 text-xs leading-relaxed text-foreground/90 font-sans whitespace-pre-wrap select-text max-h-56 overflow-y-auto">
+                  {currentPageInfo?.original_text ? (
+                    currentPageInfo.original_text
+                  ) : (
+                    <span className="text-muted-foreground italic">ไม่มีข้อความที่ตรวจจับได้สำหรับหน้านี้</span>
+                  )}
+                </div>
+              </div>
+
+              {/* 2. Ollama TranslateGemma Refined Text Card */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-fuchsia-300 uppercase tracking-wider flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-fuchsia-400" />
+                    Ollama TranslateGemma 12B
+                  </span>
+                  {currentPageInfo?.refined_text && (
+                    <button
+                      onClick={() => handleCopy(currentPageInfo.refined_text!, true)}
+                      className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+                      title="คัดลอกข้อความที่ขัดเกลาแล้ว"
+                    >
+                      {copiedRefined ? (
+                        <>
+                          <Check className="w-3 h-3 text-emerald-400" />
+                          <span className="text-emerald-400">คัดลอกแล้ว</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3 h-3" />
+                          <span>คัดลอก</span>
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
+
+                {currentPageInfo?.refined_text ? (
+                  <div className="p-3.5 rounded-xl bg-gradient-to-br from-fuchsia-950/25 via-fuchsia-900/10 to-card border border-fuchsia-500/35 text-xs leading-relaxed text-fuchsia-50 font-sans whitespace-pre-wrap select-text shadow-sm max-h-72 overflow-y-auto">
+                    {currentPageInfo.refined_text}
+                  </div>
+                ) : (
+                  <div className="p-5 rounded-xl bg-secondary/30 border border-dashed border-border/80 text-center space-y-2">
+                    <div className="w-9 h-9 rounded-xl bg-fuchsia-500/10 text-fuchsia-400 flex items-center justify-center mx-auto">
+                      <Sparkles className="w-4 h-4" />
+                    </div>
+                    <p className="text-xs font-semibold text-foreground">ยังไม่ได้ขัดเกลาสำนวนหน้านี้</p>
+                    <p className="text-[11px] text-muted-foreground leading-relaxed">
+                      กดปุ่มขัดเกลาด้านล่างเพื่อส่งบทสนทนานี้ให้ TranslateGemma ปรับสำนวนไทยให้อ่านลื่นและมีอรรถรสเหมือนมังงะแปลไทยแท้
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Action Footer */}
+            <div className="p-4 border-t border-border/70 bg-secondary/30 space-y-2 shrink-0">
+              <button
+                id="btn-refine-current-page"
+                onClick={() => handleRefineCurrentPage(true)}
+                disabled={isRefiningPage || !currentPageInfo?.original_text}
+                className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-fuchsia-600 to-violet-600 text-white text-xs font-bold shadow-md shadow-fuchsia-600/20 hover:brightness-110 active:scale-95 disabled:opacity-50 disabled:pointer-events-none transition-all flex items-center justify-center gap-2 cursor-pointer"
+                title={
+                  !currentPageInfo?.original_text
+                    ? "หน้านี้ไม่มีข้อความต้นฉบับจาก Lens"
+                    : "เริ่มขัดเกลาสำนวนหน้านี้ด้วย Ollama TranslateGemma"
+                }
+              >
+                {isRefiningPage ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>กำลังขัดเกลาสำนวนหน้านี้...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4" />
+                    <span>
+                      {currentPageInfo?.refined_text ? "ขัดเกลาหน้านี้ซ้ำ (Re-refine)" : "ขัดเกลาหน้านี้ (AI Refine)"}
+                    </span>
+                  </>
+                )}
+              </button>
+
+              <button
+                onClick={handleRefineWholeChapter}
+                className="w-full py-1.5 px-3 rounded-lg text-xs font-semibold text-muted-foreground hover:text-fuchsia-300 hover:bg-secondary transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                title="เริ่มงานขัดเกลาทุกหน้าของตอนนี้ในเบื้องหลัง"
+              >
+                <span>ขัดเกลาทั้งตอน ({totalPages} หน้า)</span>
+              </button>
+            </div>
+          </aside>
         )}
       </div>
 

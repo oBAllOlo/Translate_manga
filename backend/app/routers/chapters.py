@@ -16,12 +16,14 @@ from backend.app.models.database import get_db, insert_job
 from backend.app.models.schemas import (
     ChapterSummary, ChapterDetail, SeriesGroup, PageInfo,
     TouchupRequest, RecleanRequest,
+    RefineRequest, RefinePageResponse,
 )
 from backend.app.services.job_runner import (
     OUTPUT_ROOT, PDF_ROOT,
-    run_translate_job, run_retry_job,
+    run_translate_job, run_retry_job, run_refine_job,
 )
 from core.models import IMAGE_EXTENSIONS, read_json
+from core.refine import refine_single_page, OllamaConnectionError, OllamaModelError, OllamaError
 
 router = APIRouter(prefix="/api/chapters", tags=["chapters"])
 
@@ -80,6 +82,9 @@ def _scan_chapter(path: Path) -> dict:
     clean_title = re.sub(r"\s*\|\s*(?:Weeb\s*Central|MangaDex|MangaBlaze).*$", "", clean_title, flags=re.IGNORECASE).strip()
     series_title = re.sub(r"\s*Ch\.?\s*\d+.*$", "", clean_title).strip() or clean_title or raw_title
 
+    refined_json = path / "llm_refined.json"
+    has_refined = refined_json.exists() and bool(read_json(refined_json, []))
+
     return {
         "name": name,
         "title": raw_title,
@@ -89,6 +94,7 @@ def _scan_chapter(path: Path) -> dict:
         "thumb": thumb,
         "thumb_kind": thumb_kind,
         "has_failed": (path / "lens_failed.json").exists(),
+        "has_refined": has_refined,
         "mtime": path.stat().st_mtime,
         "series_title": series_title,
     }
@@ -180,18 +186,26 @@ async def get_chapter(name: str):
     manifest = read_json(target / "manifest.json", {})
     translations = read_json(target / "lens_translations.json", [])
     translated_by_page = {
-        int(r["page"]): r for r in translations if isinstance(r, dict)
+        int(r["page"]): r for r in translations if isinstance(r, dict) and "page" in r
+    }
+    refined_list = read_json(target / "llm_refined.json", [])
+    refined_by_page = {
+        int(r["page"]): r for r in refined_list if isinstance(r, dict) and "page" in r
     }
 
     pages: list[dict] = []
     for p in manifest.get("pages", []):
         page_no = int(p.get("page", 0))
         tr = translated_by_page.get(page_no, {})
+        rf = refined_by_page.get(page_no, {})
 
         raw_file = p.get("file") or ""
         raw_tr = tr.get("translated_file") or ""
         orig_filename = Path(raw_file).name if raw_file else f"page-{page_no:03d}.jpg"
         tr_filename = Path(raw_tr).name if raw_tr else (orig_filename if tr.get("translated_file") else None)
+
+        orig_text = rf.get("original_text") or tr.get("thai") or tr.get("text") or None
+        ref_text = rf.get("refined_text") or None
 
         pages.append({
             "page": page_no,
@@ -199,6 +213,8 @@ async def get_chapter(name: str):
             "url": p.get("url"),
             "translated_file": f"{target.name}/translated_images/{tr_filename}" if tr_filename else None,
             "has_translation": bool(tr.get("translated_file")),
+            "original_text": orig_text,
+            "refined_text": ref_text,
         })
 
     loop = asyncio.get_event_loop()
@@ -213,6 +229,7 @@ async def get_chapter(name: str):
         "pages": pages,
         "pdfs": info["pdfs"],
         "has_failed": info["has_failed"],
+        "has_refined": info["has_refined"],
     }
 
 
@@ -401,4 +418,49 @@ async def reclean_chapter_page(name: str, page_no: int, req: RecleanRequest = Re
         raise HTTPException(500, f"Recleaning failed: {exc}")
 
     return {"success": True, "page": page_no, "file": str(trans_file)}
+
+
+@router.post("/{name}/refine")
+async def refine_chapter(name: str, payload: RefineRequest = RefineRequest()):
+    """Refine all pages in a chapter via background job."""
+    target = OUTPUT_ROOT / name
+    if not target.exists() or not target.is_dir():
+        raise HTTPException(404, "Chapter not found")
+
+    lens_file = target / "lens_translations.json"
+    if not lens_file.exists():
+        raise HTTPException(400, "Chapter has not been translated yet")
+
+    job_id = uuid.uuid4().hex[:8]
+    db = await get_db()
+    try:
+        await insert_job(db, job_id, f"refine: {name}")
+    finally:
+        await db.close()
+
+    asyncio.create_task(run_refine_job(job_id, name, force=payload.force))
+    return {"job_id": job_id}
+
+
+@router.post("/{name}/pages/{page_no}/refine", response_model=RefinePageResponse)
+async def refine_page(name: str, page_no: int, payload: RefineRequest = RefineRequest()):
+    """Refine a single page's translation synchronously."""
+    target = OUTPUT_ROOT / name
+    if not target.exists() or not target.is_dir():
+        raise HTTPException(404, "Chapter not found")
+
+    lens_file = target / "lens_translations.json"
+    if not lens_file.exists():
+        raise HTTPException(400, "Chapter has not been translated yet")
+
+    try:
+        res = await refine_single_page(target, page_no=page_no, force=payload.force)
+        return res
+    except OllamaConnectionError as exc:
+        raise HTTPException(503, f"Ollama connection error: {exc}")
+    except OllamaModelError as exc:
+        raise HTTPException(400, f"Ollama model error: {exc}")
+    except Exception as exc:
+        raise HTTPException(500, f"Refine failed: {exc}")
+
 

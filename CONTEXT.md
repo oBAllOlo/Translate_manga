@@ -27,3 +27,6 @@
 | **Touch-up** | Manual or interactive fine-tuning of bubble cleaning, text masks, or translations directly within the Reader UI. |
 | **Diff Mask** | A binary mask created by comparing an original manga page with its translated counterpart to isolate text bounding boxes and modified pixels. |
 | **Bubble Inpainter** | The module responsible for erasing ghost text and blending rectangular patches to match surrounding speech bubble gradients. |
+| **LLM Refine** | An optional post-processing step that sends Thai translation text from Google Lens through a local LLM (TranslateGemma 12B via Ollama) to polish phrasing, naturalness, and manga dialogue tone. |
+| **Refined Text** | The polished Thai translation produced by LLM Refine, stored alongside the original Lens translation in `llm_refined.json` without overwriting the original text or re-rendering the images. |
+

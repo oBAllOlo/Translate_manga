@@ -70,6 +70,7 @@ export interface ChapterSummary {
   thumb?: string;
   thumb_kind: string;
   has_failed: boolean;
+  has_refined?: boolean;
   mtime: number;
   series_title?: string;
 }
@@ -88,6 +89,8 @@ export interface PageInfo {
   url?: string;
   translated_file?: string;
   has_translation: boolean;
+  original_text?: string;
+  refined_text?: string;
 }
 
 export interface ChapterDetail {
@@ -99,6 +102,16 @@ export interface ChapterDetail {
   pages: PageInfo[];
   pdfs: string[];
   has_failed: boolean;
+  has_refined?: boolean;
+}
+
+export interface RefinePageResponse {
+  page: number;
+  original_text: string;
+  refined_text: string;
+  model: string;
+  cached: boolean;
+  error?: string | null;
 }
 
 export const fetchChapters = () =>
@@ -109,6 +122,19 @@ export const translateChapter = (name: string) =>
   request<{ job_id: string }>(`/api/chapters/${encodeURIComponent(name)}/translate`, { method: "POST" });
 export const retryChapter = (name: string) =>
   request<{ job_id: string }>(`/api/chapters/${encodeURIComponent(name)}/retry`, { method: "POST" });
+export const refineChapter = (name: string, force = false) =>
+  request<{ job_id: string }>(`/api/chapters/${encodeURIComponent(name)}/refine`, {
+    method: "POST",
+    body: JSON.stringify({ force }),
+  });
+export const refineChapterPage = (name: string, page: number, force = false) =>
+  request<RefinePageResponse>(
+    `/api/chapters/${encodeURIComponent(name)}/pages/${page}/refine`,
+    {
+      method: "POST",
+      body: JSON.stringify({ force }),
+    }
+  );
 export const deleteChapter = (name: string) =>
   request<{ deleted: string }>(`/api/chapters/${encodeURIComponent(name)}`, { method: "DELETE" });
 export const deleteAllChapters = () =>

@@ -58,6 +58,21 @@ class PageInfo(BaseModel):
     url: str | None = None
     translated_file: str | None = None
     has_translation: bool = False
+    original_text: str | None = None
+    refined_text: str | None = None
+
+
+class RefineRequest(BaseModel):
+    force: bool = False
+
+
+class RefinePageResponse(BaseModel):
+    page: int
+    original_text: str = ""
+    refined_text: str = ""
+    model: str = ""
+    cached: bool = False
+    error: str | None = None
 
 
 class TouchupRequest(BaseModel):
@@ -79,6 +94,7 @@ class ChapterSummary(BaseModel):
     thumb: str | None = None
     thumb_kind: str = "none"
     has_failed: bool = False
+    has_refined: bool = False
     mtime: float = 0
     series_title: str | None = None
 
@@ -100,6 +116,7 @@ class ChapterDetail(BaseModel):
     pages: list[PageInfo] = []
     pdfs: list[str] = []
     has_failed: bool = False
+    has_refined: bool = False
 
 
 # ---------------------------------------------------------------------------

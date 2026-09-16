@@ -24,6 +24,11 @@ import {
 
 function calcProgress(j: Job): number {
   if (j.status === "done" || j.status === "error") return 100;
+  if (j.status === "refining") {
+    const total = j.total_pages || 1;
+    const ref = j.translated || 0;
+    return Math.max(5, Math.min(99, Math.round((ref / total) * 100)));
+  }
   if (j.status === "translating") {
     const total = j.total_pages || 1;
     const tr = j.translated || 0;
@@ -501,6 +506,11 @@ export default function DashboardPage() {
                         {job.status === "translating" && (
                           <span className="text-violet-400 flex items-center gap-1">
                             <Languages className="w-3 h-3 animate-pulse" /> กำลังแปลด้วย Google Lens ({job.translated || 0}/{job.total_pages || "?"})
+                          </span>
+                        )}
+                        {job.status === "refining" && (
+                          <span className="text-fuchsia-400 flex items-center gap-1">
+                            <Sparkles className="w-3.5 h-3.5 animate-pulse" /> {job.message || `กำลังขัดเกลาสำนวน AI (${job.translated || 0}/${job.total_pages || "?"})`}
                           </span>
                         )}
                         {job.status === "done" && (

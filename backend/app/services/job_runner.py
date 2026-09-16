@@ -700,3 +700,49 @@ async def run_retry_job(job_id: str, chapter_slug: str, failed_pages: list[int])
         await _update_and_broadcast(db, job_id, status="error", message=str(exc))
     finally:
         await db.close()
+
+
+async def run_refine_job(job_id: str, chapter_slug: str, force: bool = False) -> None:
+    """Refine Thai translations in background using local Ollama TranslateGemma."""
+    db = await get_db()
+    throttle = _ProgressThrottle(interval=1.5)
+    try:
+        work_dir = OUTPUT_ROOT / chapter_slug
+        if not work_dir.exists():
+            raise FileNotFoundError(f"Chapter directory {chapter_slug} not found")
+
+        await _update_and_broadcast(
+            db, job_id, status="refining", message=f"ขัดเกลาสำนวน AI: {chapter_slug}"
+        )
+
+        async def on_refine_progress(done: int, total: int) -> None:
+            await throttle.maybe_send(
+                db, job_id,
+                status="refining",
+                translated=done,
+                total_pages=total,
+                message=f"ขัดเกลาสำนวน AI ({done}/{total})",
+            )
+
+        from core.refine import refine_chapter_work_dir
+        results = await refine_chapter_work_dir(
+            work_dir,
+            force=force,
+            on_progress=on_refine_progress,
+        )
+        ok = sum(1 for r in results if not r.get("error"))
+        failed = len(results) - ok
+        await _update_and_broadcast(
+            db, job_id,
+            status="done",
+            translated=ok,
+            failed=failed,
+            message=f"ขัดเกลาสำนวน AI เสร็จสิ้น ({ok}/{len(results)} หน้า)",
+        )
+        await manager.broadcast("chapter_changed", {"slug": chapter_slug})
+    except Exception as exc:
+        logger.exception("Refine job %s failed", job_id)
+        await _update_and_broadcast(db, job_id, status="error", message=f"{type(exc).__name__}: {exc}")
+    finally:
+        await db.close()
+

@@ -5,6 +5,7 @@ import { useUIStore } from "@/stores/ui-store";
 import {
   translateChapter,
   retryChapter,
+  refineChapter,
   deleteChapter,
   resolvePdfUrl,
   type ChapterSummary,
@@ -18,6 +19,7 @@ import {
   Trash2,
   Search,
   FileDown,
+  Sparkles,
 } from "lucide-react";
 
 export function ChapterDrawer({ onRefresh }: { onRefresh: () => void }) {
@@ -119,9 +121,47 @@ export function ChapterDrawer({ onRefresh }: { onRefresh: () => void }) {
     });
   };
 
+  // Batch refine
+  const handleBatchRefine = () => {
+    const target = chapters.filter(
+      (ch) => (ch.thumb_kind === "translated" || ch.translated_count > 0)
+    );
+    if (target.length === 0) return;
+
+    setConfirmModal({
+      isOpen: true,
+      title: "ยืนยันการขัดเกลาสำนวนด้วย AI",
+      description: `ต้องการเริ่มขัดเกลาสำนวนภาษาไทยด้วย Ollama TranslateGemma ทั้งหมด ${target.length} ตอนใช่หรือไม่?`,
+      confirmText: "เริ่มขัดเกลาทั้งหมด",
+      onConfirm: async () => {
+        setBatchLoading(true);
+        setConfirmModal(null);
+        try {
+          for (const ch of target) {
+            await refineChapter(ch.name);
+          }
+          onRefresh();
+        } catch (err: any) {
+          alert("เกิดข้อผิดพลาด: " + err.message);
+        } finally {
+          setBatchLoading(false);
+        }
+      },
+    });
+  };
+
   const handleTranslateOne = async (ch: ChapterSummary) => {
     await translateChapter(ch.name);
     onRefresh();
+  };
+
+  const handleRefineOne = async (ch: ChapterSummary) => {
+    try {
+      await refineChapter(ch.name);
+      onRefresh();
+    } catch (err: any) {
+      alert("เกิดข้อผิดพลาด: " + err.message);
+    }
   };
 
   const handleRetryOne = async (ch: ChapterSummary) => {
@@ -242,6 +282,17 @@ export function ChapterDrawer({ onRefresh }: { onRefresh: () => void }) {
                   แปลทุกตอน ({untranslatedCount})
                 </button>
               )}
+              {translatedCount > 0 && (
+                <button
+                  onClick={handleBatchRefine}
+                  disabled={batchLoading}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-fuchsia-600/20 text-fuchsia-300 border border-fuchsia-500/30 text-xs font-semibold hover:bg-fuchsia-600 hover:text-white active:scale-95 transition-all disabled:opacity-50 cursor-pointer"
+                  title="ขัดเกลาสำนวนไทยด้วย AI (Ollama TranslateGemma)"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-fuchsia-400" />
+                  ขัดเกลาสำนวน AI ({translatedCount})
+                </button>
+              )}
               {failedCount > 0 && (
                 <button
                   onClick={handleBatchRetry}
@@ -351,10 +402,16 @@ export function ChapterDrawer({ onRefresh }: { onRefresh: () => void }) {
                         >
                           {ch.title || ch.name}
                         </div>
-                        <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-2">
+                        <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-2 flex-wrap">
                           <span>
                             📄 แปลแล้ว {ch.translated_count}/{ch.page_count || "?"} หน้า
                           </span>
+                          {ch.has_refined && (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-fuchsia-500/15 text-fuchsia-300 border border-fuchsia-500/30">
+                              <Sparkles className="w-2.5 h-2.5" />
+                              AI Refined
+                            </span>
+                          )}
                           {ch.pdfs.length > 0 && (
                             <span className="text-cyan-400 font-mono text-[11px]">
                               · {ch.pdfs.length} PDF
@@ -389,6 +446,20 @@ export function ChapterDrawer({ onRefresh }: { onRefresh: () => void }) {
                           <FileDown className="w-3.5 h-3.5" />
                           <span>PDF</span>
                         </a>
+                      )}
+
+                      {isTrans && (
+                        <button
+                          onClick={() => handleRefineOne(ch)}
+                          className={`p-1.5 rounded-lg border transition-all ${
+                            ch.has_refined
+                              ? "bg-fuchsia-500/15 text-fuchsia-300 hover:bg-fuchsia-500/30 border-fuchsia-500/30"
+                              : "bg-secondary text-muted-foreground hover:text-fuchsia-300 hover:bg-card border-border"
+                          }`}
+                          title={ch.has_refined ? "ขัดเกลาสำนวนซ้ำด้วย AI (Ollama)" : "ขัดเกลาสำนวนไทยด้วย AI (Ollama)"}
+                        >
+                          <Sparkles className="w-3.5 h-3.5 text-fuchsia-400" />
+                        </button>
                       )}
 
                       {!isTrans && (
