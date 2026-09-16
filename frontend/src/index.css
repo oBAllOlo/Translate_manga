@@ -1,0 +1,105 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 232 28% 6%;
+    --foreground: 220 20% 96%;
+    --card: 230 24% 9%;
+    --card-foreground: 220 20% 96%;
+    --popover: 230 25% 8%;
+    --popover-foreground: 220 20% 96%;
+    --primary: 263 70% 64%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 230 20% 13%;
+    --secondary-foreground: 220 18% 90%;
+    --muted: 230 18% 13%;
+    --muted-foreground: 224 14% 56%;
+    --accent: 263 70% 64%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 230 18% 16%;
+    --input: 230 18% 16%;
+    --ring: 263 70% 64%;
+    --radius: 0.875rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased selection:bg-primary/30 selection:text-white;
+    font-family: 'Plus Jakarta Sans', 'Noto Sans Thai', system-ui, sans-serif;
+    min-height: 100vh;
+    background-image:
+      radial-gradient(ellipse 90% 60% at 50% -15%, hsla(263, 75%, 62%, 0.14), transparent 75%),
+      radial-gradient(ellipse 60% 45% at 95% 95%, hsla(160, 80%, 45%, 0.07), transparent 60%),
+      radial-gradient(ellipse 50% 40% at 5% 75%, hsla(190, 95%, 45%, 0.05), transparent 50%);
+    background-attachment: fixed;
+  }
+}
+
+/* Custom Cyber Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(230 18% 22%);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(263 70% 64%);
+}
+
+/* Glassmorphism & Cyber Utilities */
+@layer utilities {
+  .glass-panel {
+    background: hsla(230, 24%, 9%, 0.72);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid hsla(220, 20%, 96%, 0.08);
+  }
+
+  .glass-panel-interactive {
+    background: hsla(230, 24%, 9%, 0.72);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid hsla(220, 20%, 96%, 0.08);
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .glass-panel-interactive:hover {
+    border-color: hsla(263, 70%, 64%, 0.45);
+    transform: translateY(-2px);
+    box-shadow: 0 12px 30px -10px hsla(263, 70%, 64%, 0.22);
+  }
+
+  .glow-primary {
+    box-shadow: 0 0 25px -4px hsla(263, 70%, 64%, 0.35);
+  }
+
+  .glow-emerald {
+    box-shadow: 0 0 20px -4px hsla(158, 75%, 48%, 0.35);
+  }
+
+  .glow-cyan {
+    box-shadow: 0 0 20px -4px hsla(190, 95%, 45%, 0.35);
+  }
+
+  .text-gradient {
+    @apply bg-gradient-to-r from-white via-slate-200 to-violet-300 bg-clip-text text-transparent;
+  }
+
+  .text-gradient-vivid {
+    @apply bg-gradient-to-r from-violet-400 via-fuchsia-400 to-cyan-300 bg-clip-text text-transparent;
+  }
+}

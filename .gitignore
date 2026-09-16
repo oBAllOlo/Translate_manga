@@ -1,0 +1,27 @@
+# Environment & secrets
+.env
+*.env
+.env.*
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Node / Frontend
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Outputs & Temporary
+output/
+manga.db
+*.db
+*.sqlite3
+
+# IDE & AI agents
+.claude/
+.vscode/
+.idea/

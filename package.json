@@ -1,0 +1,15 @@
+{
+  "name": "manga-translate",
+  "version": "2.0.0",
+  "private": true,
+  "description": "แปลมังงะอังกฤษเป็นไทยด้วย Google Lens",
+  "scripts": {
+    "dev": "concurrently --kill-others --names \"API,UI\" --prefix-colors \"cyan,magenta\" \"npm run api\" \"npm run ui\"",
+    "api": ".venv\\Scripts\\python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --reload",
+    "ui": "npm run dev --prefix frontend",
+    "build": "npm run build --prefix frontend"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.5"
+  }
+}
