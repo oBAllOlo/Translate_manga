@@ -25,7 +25,7 @@ import {
 export function ChapterDrawer({ onRefresh }: { onRefresh: () => void }) {
   const navigate = useNavigate();
   const { selectedSeries, isSeriesDrawerOpen, closeSeriesDrawer, showToast } = useUIStore();
-  const [filter, setFilter] = useState<"all" | "translated" | "untranslated" | "failed">("all");
+  const [filter, setFilter] = useState<"all" | "translated" | "refined" | "untranslated" | "failed">("all");
   const [search, setSearch] = useState("");
   const [batchLoading, setBatchLoading] = useState(false);
   const [confirmModal, setConfirmModal] = useState<{
@@ -45,8 +45,10 @@ export function ChapterDrawer({ onRefresh }: { onRefresh: () => void }) {
   const filteredChapters = chapters.filter((ch) => {
     const isTrans = ch.thumb_kind === "translated" || ch.translated_count > 0;
     const isFailed = ch.has_failed;
+    const isRefined = !!ch.has_refined;
 
     if (filter === "translated" && !isTrans) return false;
+    if (filter === "refined" && !isRefined) return false;
     if (filter === "untranslated" && isTrans) return false;
     if (filter === "failed" && !isFailed) return false;
 
@@ -64,6 +66,10 @@ export function ChapterDrawer({ onRefresh }: { onRefresh: () => void }) {
   const translatedCount = chapters.filter(
     (ch) => ch.thumb_kind === "translated" || ch.translated_count > 0
   ).length;
+  const refinedCount = chapters.filter((ch) => ch.has_refined).length;
+
+  const translatePercent = Math.round((translatedCount / (chapters.length || 1)) * 100);
+  const refinePercent = Math.round((refinedCount / (chapters.length || 1)) * 100);
 
   // Batch translate all untranslated
   const handleBatchTranslate = () => {
@@ -268,9 +274,47 @@ export function ChapterDrawer({ onRefresh }: { onRefresh: () => void }) {
                 <h3 className="text-lg font-bold text-foreground truncate mt-0.5" title={selectedSeries.series_title}>
                   {selectedSeries.series_title}
                 </h3>
-                <div className="flex items-center gap-3 text-xs text-muted-foreground mt-2">
+                <div className="flex items-center gap-3 text-xs text-muted-foreground mt-2 flex-wrap">
                   <span>📚 {chapters.length} ตอน</span>
-                  <span>✨ แปลแล้ว {translatedCount}/{chapters.length}</span>
+                  <span>🌐 แปล {translatedCount}/{chapters.length} ({translatePercent}%)</span>
+                  <span className="text-fuchsia-300 font-medium">✨ เกลา AI {refinedCount}/{chapters.length} ({refinePercent}%)</span>
+                </div>
+
+                {/* Dual Progress Bars */}
+                <div className="mt-3 space-y-2 max-w-sm">
+                  {/* Translation Progress */}
+                  <div className="space-y-0.5">
+                    <div className="flex justify-between text-[11px] text-muted-foreground">
+                      <span className="flex items-center gap-1">
+                        <Languages className="w-3 h-3 text-emerald-400" />
+                        แปลภาษา (Google Lens)
+                      </span>
+                      <span className="font-mono font-medium text-emerald-400">{translatePercent}%</span>
+                    </div>
+                    <div className="w-full bg-secondary/80 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        className="bg-emerald-500 h-1.5 rounded-full transition-all duration-300"
+                        style={{ width: `${translatePercent}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* AI Refine Progress */}
+                  <div className="space-y-0.5">
+                    <div className="flex justify-between text-[11px] text-muted-foreground">
+                      <span className="flex items-center gap-1 text-fuchsia-300">
+                        <Sparkles className="w-3 h-3 text-fuchsia-400" />
+                        ขัดเกลาสำนวน (Ollama AI)
+                      </span>
+                      <span className="font-mono font-medium text-fuchsia-300">{refinePercent}%</span>
+                    </div>
+                    <div className="w-full bg-secondary/80 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        className="bg-gradient-to-r from-fuchsia-500 to-violet-500 h-1.5 rounded-full transition-all duration-300"
+                        style={{ width: `${refinePercent}%` }}
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -331,8 +375,9 @@ export function ChapterDrawer({ onRefresh }: { onRefresh: () => void }) {
               )}
             </div>
 
-            <div className="text-xs text-muted-foreground font-mono">
-              {Math.round((translatedCount / (chapters.length || 1)) * 100)}% สมบูรณ์
+            <div className="flex items-center gap-3 text-xs font-mono">
+              <span className="text-emerald-400 font-medium">แปล {translatePercent}%</span>
+              <span className="text-fuchsia-300 font-medium">· เกลา AI {refinePercent}%</span>
             </div>
           </div>
 
@@ -352,6 +397,7 @@ export function ChapterDrawer({ onRefresh }: { onRefresh: () => void }) {
               {[
                 { id: "all", label: `ทั้งหมด (${chapters.length})` },
                 { id: "translated", label: `แปลแล้ว (${translatedCount})` },
+                { id: "refined", label: `✨ ขัดเกลาแล้ว (${refinedCount})` },
                 { id: "untranslated", label: `ยังไม่แปล (${untranslatedCount})` },
                 ...(failedCount > 0 ? [{ id: "failed", label: `ล้มเหลว (${failedCount})` }] : []),
               ].map((t) => (
@@ -395,13 +441,33 @@ export function ChapterDrawer({ onRefresh }: { onRefresh: () => void }) {
                           />
                         )}
                         <span
-                          className={`absolute bottom-1 right-1 px-1 py-0.2 rounded text-[9px] font-bold ${
-                            isTrans
+                          className={`absolute bottom-1 right-1 px-1.5 py-0.5 rounded text-[9px] font-bold shadow-sm flex items-center gap-0.5 ${
+                            ch.has_refined
+                              ? "bg-gradient-to-r from-emerald-600 via-fuchsia-600 to-violet-600 text-white border border-fuchsia-300/40"
+                              : isTrans
                               ? "bg-emerald-500 text-white"
                               : "bg-amber-500 text-black"
                           }`}
+                          title={
+                            ch.has_refined
+                              ? "แปลไทย + ขัดเกลาสำนวนด้วย AI (Ollama) แล้ว"
+                              : isTrans
+                              ? "แปลไทยแล้ว (Google Lens ดิบ)"
+                              : "ยังไม่ได้แปล (อังกฤษ)"
+                          }
                         >
-                          {isTrans ? "TH" : "EN"}
+                          {isTrans ? (
+                            ch.has_refined ? (
+                              <>
+                                <span>TH</span>
+                                <Sparkles className="w-2 h-2 text-fuchsia-200" />
+                              </>
+                            ) : (
+                              "TH"
+                            )
+                          ) : (
+                            "EN"
+                          )}
                         </span>
                       </div>
 
@@ -420,18 +486,52 @@ export function ChapterDrawer({ onRefresh }: { onRefresh: () => void }) {
                           <span>
                             📄 แปลแล้ว {ch.translated_count}/{ch.page_count || "?"} หน้า
                           </span>
-                          {ch.has_refined && (
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-fuchsia-500/15 text-fuchsia-300 border border-fuchsia-500/30">
-                              <Sparkles className="w-2.5 h-2.5" />
-                              AI Refined
+                          {ch.has_refined ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/35 shadow-xs">
+                              <Sparkles className="w-2.5 h-2.5 text-fuchsia-400" />
+                              เกลาแล้ว {ch.refined_count ? `${ch.refined_count}/${ch.page_count || ch.translated_count} หน้า (${Math.round((ch.refined_count / (ch.page_count || ch.translated_count || 1)) * 100)}%)` : "Ollama"}
                             </span>
-                          )}
+                          ) : isTrans ? (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-secondary/80 text-muted-foreground border border-border/80">
+                              <Sparkles className="w-2.5 h-2.5 opacity-40" />
+                              รอขัดเกลา AI (0%)
+                            </span>
+                          ) : null}
                           {ch.pdfs.length > 0 && (
                             <span className="text-cyan-400 font-mono text-[11px]">
                               · {ch.pdfs.length} PDF
                             </span>
                           )}
                         </div>
+
+                        {/* Chapter Refine mini progress bar */}
+                        {isTrans && (
+                          <div className="mt-1.5 flex items-center gap-2 max-w-[240px]">
+                            <div className="flex-1 bg-secondary rounded-full h-1.5 overflow-hidden flex">
+                              <div
+                                className="bg-emerald-500 h-full"
+                                style={{ width: `${Math.round((ch.translated_count / (ch.page_count || 1)) * 100)}%` }}
+                                title={`แปลแล้ว ${Math.round((ch.translated_count / (ch.page_count || 1)) * 100)}%`}
+                              />
+                              {ch.refined_count ? (
+                                <div
+                                  className="bg-fuchsia-400 h-full"
+                                  style={{ width: `${Math.round((ch.refined_count / (ch.page_count || 1)) * 100)}%` }}
+                                  title={`เกลา AI แล้ว ${Math.round((ch.refined_count / (ch.page_count || 1)) * 100)}%`}
+                                />
+                              ) : null}
+                            </div>
+                            <span className="text-[10px] font-mono text-muted-foreground shrink-0">
+                              {ch.refined_count ? (
+                                <span className="text-fuchsia-300 font-semibold">
+                                  เกลา {Math.round((ch.refined_count / (ch.page_count || ch.translated_count || 1)) * 100)}%
+                                </span>
+                              ) : (
+                                <span>เกลา 0%</span>
+                              )}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -465,14 +565,15 @@ export function ChapterDrawer({ onRefresh }: { onRefresh: () => void }) {
                       {isTrans && (
                         <button
                           onClick={() => handleRefineOne(ch)}
-                          className={`p-1.5 rounded-lg border transition-all ${
+                          className={`px-2 py-1.5 rounded-lg border text-xs font-semibold flex items-center gap-1 transition-all ${
                             ch.has_refined
-                              ? "bg-fuchsia-500/15 text-fuchsia-300 hover:bg-fuchsia-500/30 border-fuchsia-500/30"
+                              ? "bg-fuchsia-500/15 text-fuchsia-300 hover:bg-fuchsia-500/30 border-fuchsia-500/30 shadow-xs"
                               : "bg-secondary text-muted-foreground hover:text-fuchsia-300 hover:bg-card border-border"
                           }`}
-                          title={ch.has_refined ? "ขัดเกลาสำนวนซ้ำด้วย AI (Ollama)" : "ขัดเกลาสำนวนไทยด้วย AI (Ollama)"}
+                          title={ch.has_refined ? "ขัดเกลาสำนวนซ้ำด้วย AI (Ollama TranslateGemma)" : "ขัดเกลาสำนวนไทยด้วย AI (Ollama TranslateGemma)"}
                         >
-                          <Sparkles className="w-3.5 h-3.5 text-fuchsia-400" />
+                          <Sparkles className={`w-3.5 h-3.5 ${ch.has_refined ? "text-fuchsia-400 fill-fuchsia-400/20" : "text-fuchsia-400/70"}`} />
+                          <span className="hidden xl:inline text-[11px]">{ch.has_refined ? "เกลาซ้ำ" : "เกลา AI"}</span>
                         </button>
                       )}
 

@@ -2,7 +2,7 @@
 import { useNavigate } from "react-router-dom";
 import { useUIStore } from "@/stores/ui-store";
 import type { SeriesGroup } from "@/api/client";
-import { BookOpen, Layers, CheckCircle2, ChevronRight } from "lucide-react";
+import { BookOpen, Layers, CheckCircle2, ChevronRight, Sparkles } from "lucide-react";
 
 export function SeriesCard({ series }: { series: SeriesGroup }) {
   const navigate = useNavigate();
@@ -12,8 +12,12 @@ export function SeriesCard({ series }: { series: SeriesGroup }) {
   const translatedChapters = chapters.filter(
     (c) => c.thumb_kind === "translated" || c.translated_count > 0
   ).length;
+  const refinedChapters = chapters.filter((c) => c.has_refined).length;
   const progressPercent = Math.round(
     (translatedChapters / (chapters.length || 1)) * 100
+  );
+  const refinePercent = Math.round(
+    (refinedChapters / (chapters.length || 1)) * 100
   );
 
   const thumbUrl = series.thumb
@@ -50,13 +54,21 @@ export function SeriesCard({ series }: { series: SeriesGroup }) {
           <span>{chapters.length} ตอน</span>
         </div>
 
-        {/* Translated Status Tag */}
-        {progressPercent === 100 && (
-          <div className="absolute top-3 left-3 px-2 py-0.5 rounded-md bg-emerald-500/90 text-white text-[10px] font-bold backdrop-blur-sm shadow-md flex items-center gap-1">
-            <CheckCircle2 className="w-3 h-3" />
-            แปลครบแล้ว
-          </div>
-        )}
+        {/* Translated & Refined Status Tags */}
+        <div className="absolute top-3 left-3 flex flex-col gap-1 z-10">
+          {progressPercent === 100 && (
+            <div className="px-2 py-0.5 rounded-md bg-emerald-500/90 text-white text-[10px] font-bold backdrop-blur-sm shadow-md flex items-center gap-1">
+              <CheckCircle2 className="w-3 h-3" />
+              แปลครบแล้ว
+            </div>
+          )}
+          {refinedChapters > 0 && (
+            <div className="px-2 py-0.5 rounded-md bg-fuchsia-600/90 text-white text-[10px] font-bold backdrop-blur-sm shadow-md flex items-center gap-1">
+              <Sparkles className="w-2.5 h-2.5" />
+              <span>{refinedChapters === chapters.length ? "เกลา AI ครบแล้ว" : `เกลา AI ${refinedChapters}/${chapters.length}`}</span>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Card Content */}
@@ -68,26 +80,52 @@ export function SeriesCard({ series }: { series: SeriesGroup }) {
           >
             {series.series_title}
           </h4>
-          <p className="text-xs text-muted-foreground mt-1">
-            {translatedChapters} จาก {chapters.length} ตอนแปลแล้ว
+          <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1.5 flex-wrap">
+            <span>{translatedChapters} จาก {chapters.length} ตอนแปลแล้ว</span>
+            {refinedChapters > 0 && (
+              <span className="text-fuchsia-400 font-medium">· ✨ {refinedChapters} ตอนเกลาแล้ว</span>
+            )}
           </p>
         </div>
 
-        {/* Progress Bar */}
-        <div className="mt-3 space-y-1.5">
-          <div className="w-full bg-secondary rounded-full h-1.5 overflow-hidden">
-            <div
-              className="bg-gradient-to-r from-violet-500 to-emerald-400 h-1.5 rounded-full transition-all duration-300"
-              style={{ width: `${progressPercent}%` }}
-            />
+        {/* Progress Bars */}
+        <div className="mt-3 space-y-2">
+          {/* Translation Progress */}
+          <div className="space-y-1">
+            <div className="w-full bg-secondary rounded-full h-1.5 overflow-hidden">
+              <div
+                className="bg-gradient-to-r from-violet-500 to-emerald-400 h-1.5 rounded-full transition-all duration-300"
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
+            <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-0.5">
+              <span>แปลไทย (Lens)</span>
+              <span className="font-mono font-medium text-foreground">
+                {progressPercent}%
+              </span>
+            </div>
           </div>
 
-          <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-1">
-            <span>ความสมบูรณ์</span>
-            <span className="font-mono font-medium text-foreground">
-              {progressPercent}%
-            </span>
-          </div>
+          {/* AI Refine Progress (if any chapters translated) */}
+          {translatedChapters > 0 && (
+            <div className="space-y-1">
+              <div className="w-full bg-secondary rounded-full h-1.5 overflow-hidden">
+                <div
+                  className="bg-gradient-to-r from-fuchsia-500 to-violet-500 h-1.5 rounded-full transition-all duration-300"
+                  style={{ width: `${refinePercent}%` }}
+                />
+              </div>
+              <div className="flex items-center justify-between text-[11px] text-fuchsia-300/90 pt-0.5">
+                <span className="flex items-center gap-1">
+                  <Sparkles className="w-2.5 h-2.5 text-fuchsia-400" />
+                  เกลาสำนวน (AI)
+                </span>
+                <span className="font-mono font-medium text-fuchsia-300">
+                  {refinePercent}%
+                </span>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

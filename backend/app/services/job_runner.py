@@ -31,8 +31,14 @@ import aiosqlite
 
 from backend.app.models.database import get_db, update_job, insert_job
 from backend.app.ws.progress import manager
-from core.downloader import _get_session, _fetch_image, _mangadex_fallback, _unwrap_spoilerhat
-from core.models import PageImage, slugify, write_json, read_json, IMAGE_EXTENSIONS
+from core.models import (
+    PageImage,
+    slugify,
+    write_json,
+    read_json,
+    IMAGE_EXTENSIONS,
+    resolve_safe_chapter_dir,
+)
 from core.parsers import parse_source
 from core.pdf import make_long_strip_pdf
 from core.translate import LENS_CORE_DIR, save_data_url, lens_translate_work_dir
@@ -90,6 +96,45 @@ async def _update_and_broadcast(db: aiosqlite.Connection, job_id: str, **fields)
     """Update job in DB and broadcast the change."""
     await update_job(db, job_id, **fields)
     await _broadcast_job(job_id, **fields)
+
+
+# ---------------------------------------------------------------------------
+# Active task registry
+# ---------------------------------------------------------------------------
+
+ACTIVE_TASKS: dict[str, asyncio.Task] = {}
+
+
+def register_job_task(job_id: str, task: asyncio.Task) -> asyncio.Task:
+    """Register an asyncio Task for a running job so it can be cancelled later."""
+    ACTIVE_TASKS[job_id] = task
+
+    def _on_done(t: asyncio.Task) -> None:
+        if ACTIVE_TASKS.get(job_id) is t:
+            ACTIVE_TASKS.pop(job_id, None)
+
+    task.add_done_callback(_on_done)
+    return task
+
+
+async def cancel_job_task(job_id: str) -> bool:
+    """Cancel a running job task by ID. Returns True if task was found and cancelled."""
+    task = ACTIVE_TASKS.pop(job_id, None)
+    if task and not task.done():
+        task.cancel()
+        return True
+    return False
+
+
+async def cancel_all_job_tasks() -> int:
+    """Cancel all running job tasks. Returns count of tasks cancelled."""
+    count = 0
+    for job_id, task in list(ACTIVE_TASKS.items()):
+        if not task.done():
+            task.cancel()
+            count += 1
+    ACTIVE_TASKS.clear()
+    return count
 
 
 # ---------------------------------------------------------------------------
@@ -415,8 +460,9 @@ async def run_single_job(job_id: str, url: str, chunk_size: int, concurrency: in
         loop = asyncio.get_running_loop()
         title, pages = await loop.run_in_executor(None, parse_source, url)
 
-        chapter_slug = _urlparse(url).path.strip("/").split("/")[-1] or slugify(title)
-        work_dir = OUTPUT_ROOT / chapter_slug
+        raw_slug = _urlparse(url).path.strip("/").split("/")[-1]
+        chapter_slug = slugify(raw_slug) if raw_slug and raw_slug not in (".", "..") else slugify(title)
+        work_dir = resolve_safe_chapter_dir(chapter_slug, OUTPUT_ROOT)
         work_dir.mkdir(parents=True, exist_ok=True)
 
         total_p = len(pages)
@@ -497,6 +543,9 @@ async def run_single_job(job_id: str, url: str, chunk_size: int, concurrency: in
         )
         await manager.broadcast("chapter_changed", {"slug": chapter_slug})
 
+    except asyncio.CancelledError:
+        logger.info("Job %s was cancelled", job_id)
+        await _update_and_broadcast(db, job_id, status="error", message="ยกเลิกการทำงานแล้ว (Cancelled)")
     except Exception as exc:
         logger.exception("Job %s failed", job_id)
         await _update_and_broadcast(db, job_id, status="error", message=f"{type(exc).__name__}: {exc}")
@@ -529,8 +578,9 @@ async def run_range_job(
             )
             try:
                 title, pages = await loop.run_in_executor(None, parse_source, chapter_url)
-                chapter_slug = _urlparse(chapter_url).path.strip("/").split("/")[-1] or f"chapter-{n}"
-                work_dir = OUTPUT_ROOT / chapter_slug
+                raw_slug = _urlparse(chapter_url).path.strip("/").split("/")[-1]
+                chapter_slug = slugify(raw_slug) if raw_slug and raw_slug not in (".", "..") else f"chapter-{n}"
+                work_dir = resolve_safe_chapter_dir(chapter_slug, OUTPUT_ROOT)
                 work_dir.mkdir(parents=True, exist_ok=True)
 
                 total_p = len(pages)
@@ -612,6 +662,9 @@ async def run_range_job(
             msg += f" · failed: {failures}"
         await _update_and_broadcast(db, job_id, status="done", message=msg)
 
+    except asyncio.CancelledError:
+        logger.info("Range job %s was cancelled", job_id)
+        await _update_and_broadcast(db, job_id, status="error", message="ยกเลิกการทำงานแล้ว (Cancelled)")
     except Exception as exc:
         logger.exception("Range job %s failed", job_id)
         await _update_and_broadcast(db, job_id, status="error", message=str(exc))
@@ -626,7 +679,7 @@ async def run_translate_job(
     db = await get_db()
     throttle = _ProgressThrottle(interval=1.5)
     try:
-        work_dir = OUTPUT_ROOT / chapter_slug
+        work_dir = resolve_safe_chapter_dir(chapter_slug, OUTPUT_ROOT)
         await _update_and_broadcast(db, job_id, status="translating", message=f"แปล {chapter_slug}")
 
         # Adapt two-arg on_progress signature from lens_translate_work_dir to throttle
@@ -656,6 +709,9 @@ async def run_translate_job(
             pdf=rel_pdf, message="เสร็จแล้ว",
         )
         await manager.broadcast("chapter_changed", {"slug": chapter_slug})
+    except asyncio.CancelledError:
+        logger.info("Translate job %s was cancelled", job_id)
+        await _update_and_broadcast(db, job_id, status="error", message="ยกเลิกการทำงานแล้ว (Cancelled)")
     except Exception as exc:
         logger.exception("Translate job %s failed", job_id)
         await _update_and_broadcast(db, job_id, status="error", message=f"{type(exc).__name__}: {exc}")
@@ -668,7 +724,7 @@ async def run_retry_job(job_id: str, chapter_slug: str, failed_pages: list[int])
     db = await get_db()
     throttle = _ProgressThrottle(interval=1.5)
     try:
-        work_dir = OUTPUT_ROOT / chapter_slug
+        work_dir = resolve_safe_chapter_dir(chapter_slug, OUTPUT_ROOT)
         await _update_and_broadcast(
             db, job_id, status="translating",
             translated=0, total_pages=len(failed_pages),
@@ -695,6 +751,9 @@ async def run_retry_job(job_id: str, chapter_slug: str, failed_pages: list[int])
             message=f"Retry เสร็จ: {ok} สำเร็จ",
         )
         await manager.broadcast("chapter_changed", {"slug": chapter_slug})
+    except asyncio.CancelledError:
+        logger.info("Retry job %s was cancelled", job_id)
+        await _update_and_broadcast(db, job_id, status="error", message="ยกเลิกการทำงานแล้ว (Cancelled)")
     except Exception as exc:
         logger.exception("Retry job %s failed", job_id)
         await _update_and_broadcast(db, job_id, status="error", message=str(exc))
@@ -707,7 +766,7 @@ async def run_refine_job(job_id: str, chapter_slug: str, force: bool = False) ->
     db = await get_db()
     throttle = _ProgressThrottle(interval=1.5)
     try:
-        work_dir = OUTPUT_ROOT / chapter_slug
+        work_dir = resolve_safe_chapter_dir(chapter_slug, OUTPUT_ROOT)
         if not work_dir.exists():
             raise FileNotFoundError(f"Chapter directory {chapter_slug} not found")
 
@@ -740,6 +799,9 @@ async def run_refine_job(job_id: str, chapter_slug: str, force: bool = False) ->
             message=f"ขัดเกลาสำนวน AI เสร็จสิ้น ({ok}/{len(results)} หน้า)",
         )
         await manager.broadcast("chapter_changed", {"slug": chapter_slug})
+    except asyncio.CancelledError:
+        logger.info("Refine job %s was cancelled", job_id)
+        await _update_and_broadcast(db, job_id, status="error", message="ยกเลิกการทำงานแล้ว (Cancelled)")
     except Exception as exc:
         logger.exception("Refine job %s failed", job_id)
         await _update_and_broadcast(db, job_id, status="error", message=f"{type(exc).__name__}: {exc}")

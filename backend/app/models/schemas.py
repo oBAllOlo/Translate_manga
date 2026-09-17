@@ -90,6 +90,7 @@ class ChapterSummary(BaseModel):
     title: str
     page_count: int | None = None
     translated_count: int = 0
+    refined_count: int = 0
     pdfs: list[str] = []
     thumb: str | None = None
     thumb_kind: str = "none"
@@ -113,6 +114,7 @@ class ChapterDetail(BaseModel):
     source: str | None = None
     page_count: int | None = None
     translated_count: int = 0
+    refined_count: int = 0
     pages: list[PageInfo] = []
     pdfs: list[str] = []
     has_failed: bool = False

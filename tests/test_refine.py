@@ -33,7 +33,7 @@ class TestCoreRefine(unittest.TestCase):
 
         mock_tags_resp = MagicMock(status_code=200)
         mock_tags_resp.json.return_value = {
-            "models": [{"name": "translategemma:12b"}, {"name": "llama3:latest"}]
+            "models": [{"name": "gemma4:e4b"}, {"name": "llama3:latest"}]
         }
 
         mock_chat_resp1 = MagicMock(status_code=200)
@@ -105,7 +105,7 @@ class TestCoreRefine(unittest.TestCase):
                 "page": 1,
                 "original_text": "หน้าหนึ่ง",
                 "refined_text": "หน้าหนึ่ง (ขัดเกลาเดิม)",
-                "model": "translategemma:12b",
+                "model": "gemma4:e4b",
                 "timestamp": "2026-09-16T10:00:00",
             }
         ]
@@ -113,7 +113,7 @@ class TestCoreRefine(unittest.TestCase):
             json.dump(refined_existing, f, ensure_ascii=False)
 
         mock_tags_resp = MagicMock(status_code=200)
-        mock_tags_resp.json.return_value = {"models": [{"name": "translategemma:12b"}]}
+        mock_tags_resp.json.return_value = {"models": [{"name": "gemma4:e4b"}]}
 
         mock_chat_resp = MagicMock(status_code=200)
         mock_chat_resp.json.return_value = {
@@ -188,7 +188,7 @@ class TestCoreRefine(unittest.TestCase):
         async def run_missing_model():
             with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get:
                 mock_get.return_value = mock_tags_resp
-                await refine_chapter_work_dir(self.work_dir, model="translategemma:12b")
+                await refine_chapter_work_dir(self.work_dir, model="gemma4:e4b")
 
         with self.assertRaises(OllamaModelError):
             asyncio.run(run_missing_model())
@@ -207,7 +207,7 @@ class TestCoreRefine(unittest.TestCase):
             json.dump(lens_data, f, ensure_ascii=False)
 
         mock_tags_resp = MagicMock(status_code=200)
-        mock_tags_resp.json.return_value = {"models": [{"name": "translategemma:12b"}]}
+        mock_tags_resp.json.return_value = {"models": [{"name": "gemma4:e4b"}]}
 
         mock_ok1 = MagicMock(status_code=200)
         mock_ok1.json.return_value = {"message": {"content": "สวัสดีดีจ้า"}}
@@ -248,7 +248,7 @@ class TestCoreRefine(unittest.TestCase):
             json.dump(lens_data, f, ensure_ascii=False)
 
         mock_tags_resp = MagicMock(status_code=200)
-        mock_tags_resp.json.return_value = {"models": [{"name": "translategemma:12b"}]}
+        mock_tags_resp.json.return_value = {"models": [{"name": "gemma4:e4b"}]}
 
         mock_chat_resp = MagicMock(status_code=200)
         mock_chat_resp.json.return_value = {"message": {"content": "หน้า 2 ปรับปรุงแล้ว"}}

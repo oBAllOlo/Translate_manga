@@ -14,10 +14,16 @@ router = APIRouter(tags=["files"])
 @router.get("/output/{filepath:path}")
 async def serve_output(filepath: str):
     """Serve files from the output directory."""
+    output_root = OUTPUT_ROOT.resolve()
     target = (OUTPUT_ROOT / filepath).resolve()
-    # Security: ensure the resolved path is still under OUTPUT_ROOT
-    if not str(target).startswith(str(OUTPUT_ROOT.resolve())):
-        return Response(status_code=403)
+    # Security: ensure the resolved path is strictly contained under OUTPUT_ROOT
+    try:
+        if not target.is_relative_to(output_root):
+            return Response(status_code=403)
+    except AttributeError:
+        import os
+        if not str(target).startswith(str(output_root) + os.sep):
+            return Response(status_code=403)
     if not target.exists() or not target.is_file():
         return Response(status_code=404)
     return FileResponse(target)

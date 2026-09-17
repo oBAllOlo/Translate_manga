@@ -54,8 +54,12 @@ export const createRangeJob = (base_url: string, start: number, end: number, chu
     method: "POST",
     body: JSON.stringify({ base_url, start, end, chunk, concurrency }),
   });
-export const deleteAllJobs = () =>
-  request<{ ok: boolean }>("/api/jobs", { method: "DELETE" });
+export const cancelJob = (id: string) =>
+  request<{ ok: boolean; cancelled: boolean }>(`/api/jobs/${id}/cancel`, { method: "POST" });
+export const cancelAllJobs = () =>
+  request<{ ok: boolean; cancelled_count: number }>("/api/jobs/cancel-all", { method: "POST" });
+export const deleteAllJobs = (all = false) =>
+  request<{ ok: boolean }>(`/api/jobs${all ? "?all=true" : ""}`, { method: "DELETE" });
 export const deleteJob = (id: string) =>
   request<{ ok: boolean }>(`/api/jobs/${id}`, { method: "DELETE" });
 
@@ -66,6 +70,7 @@ export interface ChapterSummary {
   title: string;
   page_count?: number;
   translated_count: number;
+  refined_count?: number;
   pdfs: string[];
   thumb?: string;
   thumb_kind: string;
@@ -99,6 +104,7 @@ export interface ChapterDetail {
   source?: string;
   page_count?: number;
   translated_count: number;
+  refined_count?: number;
   pages: PageInfo[];
   pdfs: string[];
   has_failed: boolean;

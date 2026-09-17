@@ -21,8 +21,9 @@ from backend.app.models.schemas import (
 from backend.app.services.job_runner import (
     OUTPUT_ROOT, PDF_ROOT,
     run_translate_job, run_retry_job, run_refine_job,
+    register_job_task,
 )
-from core.models import IMAGE_EXTENSIONS, read_json, extract_page_text
+from core.models import IMAGE_EXTENSIONS, read_json, extract_page_text, resolve_safe_chapter_dir
 from core.refine import refine_single_page, OllamaConnectionError, OllamaModelError, OllamaError
 
 router = APIRouter(prefix="/api/chapters", tags=["chapters"])
@@ -31,6 +32,14 @@ router = APIRouter(prefix="/api/chapters", tags=["chapters"])
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _resolve_chapter_dir(name: str) -> Path:
+    """Safely resolve and validate a chapter directory path under OUTPUT_ROOT."""
+    try:
+        return resolve_safe_chapter_dir(name, OUTPUT_ROOT)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
 
 
 def _scan_chapter(path: Path) -> dict:
@@ -83,13 +92,16 @@ def _scan_chapter(path: Path) -> dict:
     series_title = re.sub(r"\s*Ch\.?\s*\d+.*$", "", clean_title).strip() or clean_title or raw_title
 
     refined_json = path / "llm_refined.json"
-    has_refined = refined_json.exists() and bool(read_json(refined_json, []))
+    refined_rows = read_json(refined_json, []) if refined_json.exists() else []
+    refined_count = len([r for r in refined_rows if isinstance(r, dict) and r.get("refined_text")])
+    has_refined = refined_count > 0
 
     return {
         "name": name,
         "title": raw_title,
         "page_count": manifest.get("page_count"),
         "translated_count": _count_images(path / "translated_images"),
+        "refined_count": refined_count,
         "pdfs": pdfs,
         "thumb": thumb,
         "thumb_kind": thumb_kind,
@@ -169,7 +181,7 @@ async def list_chapters():
 
 @router.get("/{name}")
 async def get_chapter(name: str):
-    target = OUTPUT_ROOT / name
+    target = _resolve_chapter_dir(name)
     if not target.exists():
         # Case-insensitive check
         found = None
@@ -226,6 +238,7 @@ async def get_chapter(name: str):
         "source": manifest.get("source"),
         "page_count": manifest.get("page_count"),
         "translated_count": info["translated_count"],
+        "refined_count": info.get("refined_count", 0),
         "pages": pages,
         "pdfs": info["pdfs"],
         "has_failed": info["has_failed"],
@@ -235,7 +248,7 @@ async def get_chapter(name: str):
 
 @router.post("/{name}/translate")
 async def translate_chapter(name: str):
-    target = OUTPUT_ROOT / name
+    target = _resolve_chapter_dir(name)
     if not target.exists():
         raise HTTPException(404, "Chapter not found")
 
@@ -246,13 +259,14 @@ async def translate_chapter(name: str):
     finally:
         await db.close()
 
-    asyncio.create_task(run_translate_job(job_id, name))
+    task = asyncio.create_task(run_translate_job(job_id, name))
+    register_job_task(job_id, task)
     return {"job_id": job_id}
 
 
 @router.post("/{name}/retry")
 async def retry_chapter(name: str):
-    target = OUTPUT_ROOT / name
+    target = _resolve_chapter_dir(name)
     if not target.exists():
         raise HTTPException(404, "Chapter not found")
 
@@ -267,7 +281,8 @@ async def retry_chapter(name: str):
     finally:
         await db.close()
 
-    asyncio.create_task(run_retry_job(job_id, name, [int(p) for p in failed]))
+    task = asyncio.create_task(run_retry_job(job_id, name, [int(p) for p in failed]))
+    register_job_task(job_id, task)
     return {"job_id": job_id}
 
 
@@ -286,7 +301,7 @@ def _safe_rmtree(path: Path):
 
 @router.delete("/{name}")
 async def delete_chapter(name: str):
-    target = OUTPUT_ROOT / name
+    target = _resolve_chapter_dir(name)
     if not target.exists() or not target.is_dir():
         raise HTTPException(404, "Chapter not found")
     if target.resolve().parent != OUTPUT_ROOT.resolve():
@@ -354,8 +369,10 @@ async def delete_all_chapters():
 @router.post("/{name}/pages/{page_no}/touchup")
 async def touchup_chapter_page(name: str, page_no: int, payload: TouchupRequest):
     """Save manual inpainting or typesetting edits from reader touch-up studio."""
+    if page_no < 1:
+        raise HTTPException(400, "page_no must be >= 1")
     import base64
-    target = OUTPUT_ROOT / name
+    target = _resolve_chapter_dir(name)
     if not target.exists() or not target.is_dir():
         raise HTTPException(404, "Chapter not found")
 
@@ -380,7 +397,9 @@ async def touchup_chapter_page(name: str, page_no: int, payload: TouchupRequest)
 @router.post("/{name}/pages/{page_no}/reclean")
 async def reclean_chapter_page(name: str, page_no: int, req: RecleanRequest = RecleanRequest()):
     """Re-run the automated bubble cleaner & inpainter on a specific page."""
-    target = OUTPUT_ROOT / name
+    if page_no < 1:
+        raise HTTPException(400, "page_no must be >= 1")
+    target = _resolve_chapter_dir(name)
     if not target.exists() or not target.is_dir():
         raise HTTPException(404, "Chapter not found")
 
@@ -423,7 +442,7 @@ async def reclean_chapter_page(name: str, page_no: int, req: RecleanRequest = Re
 @router.post("/{name}/refine")
 async def refine_chapter(name: str, payload: RefineRequest = RefineRequest()):
     """Refine all pages in a chapter via background job."""
-    target = OUTPUT_ROOT / name
+    target = _resolve_chapter_dir(name)
     if not target.exists() or not target.is_dir():
         raise HTTPException(404, "Chapter not found")
 
@@ -438,14 +457,17 @@ async def refine_chapter(name: str, payload: RefineRequest = RefineRequest()):
     finally:
         await db.close()
 
-    asyncio.create_task(run_refine_job(job_id, name, force=payload.force))
+    task = asyncio.create_task(run_refine_job(job_id, name, force=payload.force))
+    register_job_task(job_id, task)
     return {"job_id": job_id}
 
 
 @router.post("/{name}/pages/{page_no}/refine", response_model=RefinePageResponse)
 async def refine_page(name: str, page_no: int, payload: RefineRequest = RefineRequest()):
     """Refine a single page's translation synchronously."""
-    target = OUTPUT_ROOT / name
+    if page_no < 1:
+        raise HTTPException(400, "page_no must be >= 1")
+    target = _resolve_chapter_dir(name)
     if not target.exists() or not target.is_dir():
         raise HTTPException(404, "Chapter not found")
 

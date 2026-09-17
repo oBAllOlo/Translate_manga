@@ -23,6 +23,7 @@ from manga_translate import (
     slugify,
     write_json,
 )
+from core.models import resolve_safe_chapter_dir
 
 
 class _QuietFilter(logging.Filter):
@@ -75,8 +76,9 @@ def run_job(job_id: str, url: str, chunk_size: int) -> None:
         update_job(job_id, status="parsing", message="Parsing chapter URL")
         title, pages = parse_source(url)
         from urllib.parse import urlparse as _urlparse
-        chapter_slug = _urlparse(url).path.strip("/").split("/")[-1] or slugify(title)
-        work_dir = OUTPUT_ROOT / chapter_slug
+        raw_slug = _urlparse(url).path.strip("/").split("/")[-1]
+        chapter_slug = slugify(raw_slug) if raw_slug and raw_slug not in (".", "..") else slugify(title)
+        work_dir = resolve_safe_chapter_dir(chapter_slug, OUTPUT_ROOT)
         work_dir.mkdir(parents=True, exist_ok=True)
         update_job(job_id, status="downloading", title=title, work_dir=str(work_dir),
                    slug=work_dir.name, total_pages=len(pages),
@@ -104,8 +106,9 @@ def run_range_job(job_id: str, base_url: str, start: int, end: int, chunk_size: 
         try:
             title, pages = parse_source(chapter_url)
             from urllib.parse import urlparse as _urlparse
-            chapter_slug = _urlparse(chapter_url).path.strip("/").split("/")[-1] or f"chapter-{n}"
-            work_dir = OUTPUT_ROOT / chapter_slug
+            raw_slug = _urlparse(chapter_url).path.strip("/").split("/")[-1]
+            chapter_slug = slugify(raw_slug) if raw_slug and raw_slug not in (".", "..") else f"chapter-{n}"
+            work_dir = resolve_safe_chapter_dir(chapter_slug, OUTPUT_ROOT)
             work_dir.mkdir(parents=True, exist_ok=True)
             update_job(job_id, status="downloading", title=title, total_pages=len(pages),
                        work_dir=str(work_dir), slug=work_dir.name)
@@ -634,9 +637,10 @@ function renderChapters() {
     const badge = c.thumb_kind === 'translated'
       ? '<span class="thumb-badge ok">TH</span>'
       : (c.thumb_kind === 'original' ? '<span class="thumb-badge warn">EN</span>' : '');
+    const safeName = encodeURIComponent(c.name || '').replace(/'/g, "%27");
     return `<div class="chapter">
       <div class="chapter-thumb">
-        ${c.thumb ? `<img loading="lazy" src="/output/${encodeURI(c.name)}/${c.thumb}">` : ''}
+        ${c.thumb ? `<img loading="lazy" src="/output/${encodeURI(c.name)}/${encodeURI(c.thumb)}">` : ''}
         ${badge}
       </div>
       <div class="chapter-info">
@@ -644,9 +648,9 @@ function renderChapters() {
         <div class="chapter-meta">${c.translated_count||0}/${c.page_count||'?'} แปล · ${c.pdfs.length} PDF</div>
       </div>
       <div class="chapter-actions">
-        ${c.pdfs.length ? `<a href="/output/${encodeURI(c.name)}/${encodeURI(c.pdfs[0])}" target="_blank">📖 อ่าน</a>` : `<button onclick="translateChapter('${c.name}')">แปล</button>`}
-        ${c.has_failed ? `<button onclick="retry('${c.name}')">retry</button>` : ''}
-        <button class="danger" onclick="del('${c.name}')">ลบ</button>
+        ${c.pdfs.length ? `<a href="/output/${encodeURI(c.name)}/${encodeURI(c.pdfs[0])}" target="_blank">📖 อ่าน</a>` : `<button onclick="translateChapter(decodeURIComponent('${safeName}'))">แปล</button>`}
+        ${c.has_failed ? `<button onclick="retry(decodeURIComponent('${safeName}'))">retry</button>` : ''}
+        <button class="danger" onclick="del(decodeURIComponent('${safeName}'))">ลบ</button>
       </div>
     </div>`;
   }).join('');
@@ -849,6 +853,12 @@ def api_create_job():
     url = (data.get("url") or "").strip()
     if not url:
         return jsonify({"error": "url required"}), 400
+    try:
+        from core.parsers import get_parser
+        get_parser(url)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
+
     job_id = uuid.uuid4().hex[:8]
     with JOBS_LOCK:
         JOBS[job_id] = {
@@ -857,6 +867,9 @@ def api_create_job():
         }
     threading.Thread(target=run_job, args=(job_id, url, int(data.get("chunk", 8))), daemon=True).start()
     return jsonify({"id": job_id}), 201
+
+
+MAX_CHAPTER_RANGE = 50
 
 
 @app.route("/api/range", methods=["POST"])
@@ -873,6 +886,18 @@ def api_range():
         return jsonify({"error": f"start ({start}) > end ({end})"}), 400
     if start < 1:
         return jsonify({"error": "start must be >= 1"}), 400
+    if (end - start + 1) > MAX_CHAPTER_RANGE:
+        return jsonify({
+            "error": f"Range exceeds maximum limit of {MAX_CHAPTER_RANGE} chapters (requested {end - start + 1})"
+        }), 400
+
+    try:
+        from core.parsers import get_parser
+        test_url = f"{base_url if base_url.endswith('-') else base_url.rstrip('/') + '/'}chapter-{start}/"
+        get_parser(test_url)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
+
     job_id = uuid.uuid4().hex[:8]
     with JOBS_LOCK:
         JOBS[job_id] = {

@@ -2,7 +2,17 @@
 import { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { fetchJobs, fetchChapters, createJob, deleteAllJobs, deleteJob, resolvePdfUrl, type Job } from "@/api/client";
+import {
+  fetchJobs,
+  fetchChapters,
+  createJob,
+  deleteAllJobs,
+  deleteJob,
+  cancelJob,
+  cancelAllJobs,
+  resolvePdfUrl,
+  type Job,
+} from "@/api/client";
 import { useUIStore } from "@/stores/ui-store";
 import { ConfirmModal } from "@/components/common/confirm-modal";
 import {
@@ -20,6 +30,7 @@ import {
   PlusCircle,
   Trash2,
   X,
+  Ban,
 } from "lucide-react";
 
 function calcProgress(j: Job): number {
@@ -60,7 +71,7 @@ function resolveThumbUrl(slug: string, thumb?: string): string {
 export default function DashboardPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { openJobModal, continueReading, clearContinueReading } = useUIStore();
+  const { openJobModal, continueReading, clearContinueReading, showToast } = useUIStore();
   const [quickUrl, setQuickUrl] = useState("");
   const [quickChunk, setQuickChunk] = useState(8);
   const [quickConcurrency, setQuickConcurrency] = useState(8);
@@ -68,6 +79,9 @@ export default function DashboardPage() {
   const [jobFilter, setJobFilter] = useState<"all" | "active" | "done" | "error">("all");
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
+  const [clearMode, setClearMode] = useState<"completed" | "all">("completed");
+  const [cancellingJobId, setCancellingJobId] = useState<string | null>(null);
+  const [isCancellingAll, setIsCancellingAll] = useState(false);
 
   const { data: jobsData } = useQuery({
     queryKey: ["jobs"],
@@ -128,12 +142,41 @@ export default function DashboardPage() {
     }
   };
 
+  const handleCancelSingleJob = async (jobId: string) => {
+    setCancellingJobId(jobId);
+    try {
+      await cancelJob(jobId);
+      showToast("ยกเลิกงานเรียบร้อยแล้ว", "success");
+      await queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    } catch (err: any) {
+      showToast("เกิดข้อผิดพลาดในการยกเลิก: " + err.message, "error");
+    } finally {
+      setCancellingJobId(null);
+    }
+  };
+
+  const handleCancelAllJobs = async () => {
+    setIsCancellingAll(true);
+    try {
+      const res = await cancelAllJobs();
+      showToast(`ยกเลิกงานที่กำลังรันทั้งหมดเรียบร้อยแล้ว (${res.cancelled_count || 0} งาน)`, "success");
+      await queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    } catch (err: any) {
+      showToast("เกิดข้อผิดพลาดในการยกเลิกงาน: " + err.message, "error");
+    } finally {
+      setIsCancellingAll(false);
+    }
+  };
+
   const handleClearHistory = async () => {
     setIsClearing(true);
     try {
-      await deleteAllJobs();
+      await deleteAllJobs(clearMode === "all");
       await queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      showToast(clearMode === "all" ? "ยกเลิกและล้างคิวงานทั้งหมดแล้ว" : "ล้างประวัติงานที่เสร็จสิ้นแล้ว", "success");
       setIsClearModalOpen(false);
+    } catch (err: any) {
+      showToast("เกิดข้อผิดพลาด: " + err.message, "error");
     } finally {
       setIsClearing(false);
     }
@@ -143,6 +186,7 @@ export default function DashboardPage() {
     try {
       await deleteJob(jobId);
       await queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      showToast("ลบงานออกจากรายการแล้ว", "success");
     } catch (err) {
       console.error("Failed to delete job", err);
     }
@@ -383,15 +427,35 @@ export default function DashboardPage() {
 
           {/* Actions & Filter Pills */}
           <div className="flex items-center gap-2 flex-wrap">
-            {jobs.some((j) => j.status === "done" || j.status === "error") && (
+            {activeJobs.length > 0 && (
+              <button
+                id="btn-cancel-all-jobs"
+                onClick={handleCancelAllJobs}
+                disabled={isCancellingAll}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-500/15 text-rose-300 hover:bg-rose-500 hover:text-white border border-rose-500/30 hover:border-rose-500 text-xs font-semibold shadow-sm active:scale-95 transition-all cursor-pointer disabled:opacity-50"
+                title="ยกเลิกงานทั้งหมดที่กำลังทำงานอยู่"
+              >
+                {isCancellingAll ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Ban className="w-3.5 h-3.5 text-rose-400" />
+                )}
+                <span>ยกเลิกงานทั้งหมด ({activeJobs.length})</span>
+              </button>
+            )}
+
+            {jobs.length > 0 && (
               <button
                 id="btn-clear-jobs-history"
-                onClick={() => setIsClearModalOpen(true)}
+                onClick={() => {
+                  setClearMode(activeJobs.length > 0 ? "all" : "completed");
+                  setIsClearModalOpen(true);
+                }}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-muted-foreground hover:text-destructive hover:bg-destructive/10 border border-border/80 hover:border-destructive/30 text-xs font-semibold transition-all cursor-pointer"
-                title="ล้างประวัติงานที่เสร็จสิ้นหรือมีข้อผิดพลาด"
+                title="ล้างรายการงานในคิว"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>ล้างประวัติงาน</span>
+                <span>ล้างรายการงาน</span>
               </button>
             )}
 
@@ -477,15 +541,30 @@ export default function DashboardPage() {
                         </a>
                       )}
 
-                      {(job.status === "done" || job.status === "error") && (
+                      {/* Cancel Running Job Button */}
+                      {isRunning && (
                         <button
-                          onClick={() => handleDeleteSingleJob(job.id)}
-                          className="p-1.5 rounded-xl text-muted-foreground hover:text-destructive hover:bg-destructive/10 border border-transparent hover:border-destructive/30 transition-all cursor-pointer"
-                          title="ลบงานนี้ออกจากประวัติ"
+                          onClick={() => handleCancelSingleJob(job.id)}
+                          disabled={cancellingJobId === job.id}
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-rose-500/15 text-rose-300 hover:bg-rose-500 hover:text-white border border-rose-500/30 text-xs font-semibold shadow-xs active:scale-95 transition-all cursor-pointer disabled:opacity-50"
+                          title="ยกเลิกการทำงานของงานนี้ทันที"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          {cancellingJobId === job.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Ban className="w-3.5 h-3.5" />
+                          )}
+                          <span>ยกเลิก</span>
                         </button>
                       )}
+
+                      <button
+                        onClick={() => handleDeleteSingleJob(job.id)}
+                        className="p-1.5 rounded-xl text-muted-foreground hover:text-destructive hover:bg-destructive/10 border border-transparent hover:border-destructive/30 transition-all cursor-pointer"
+                        title={isRunning ? "ยกเลิกและลบงานนี้" : "ลบงานนี้ออกจากประวัติ"}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
 
@@ -551,9 +630,13 @@ export default function DashboardPage() {
       {/* Clear Jobs History Confirmation Modal */}
       <ConfirmModal
         isOpen={isClearModalOpen}
-        title="ยืนยันการล้างประวัติงาน"
-        description="ต้องการลบประวัติงานที่เสร็จสิ้นและข้อผิดพลาดทั้งหมดออกจากรายการใช่หรือไม่? ไฟล์มังงะที่แปลแล้วจะไม่ถูกลบ"
-        confirmText="ล้างประวัติ"
+        title={clearMode === "all" ? "ยืนยันการยกเลิกและล้างคิวงานทั้งหมด" : "ยืนยันการล้างประวัติงาน"}
+        description={
+          clearMode === "all"
+            ? `ต้องการยกเลิกงานที่กำลังรันอยู่ทั้งหมด และลบรายการงานทั้ง ${jobs.length} งานออกจากระบบใช่หรือไม่? ไฟล์มังงะที่แปลแล้วจะไม่ถูกลบ`
+            : "ต้องการลบประวัติงานที่เสร็จสิ้นและข้อผิดพลาดทั้งหมดออกจากรายการใช่หรือไม่? ไฟล์มังงะที่แปลแล้วจะไม่ถูกลบ"
+        }
+        confirmText={clearMode === "all" ? "ยกเลิกและล้างทั้งหมด" : "ล้างประวัติ"}
         cancelText="ยกเลิก"
         isDestructive={true}
         isLoading={isClearing}

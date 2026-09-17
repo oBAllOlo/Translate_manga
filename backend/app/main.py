@@ -54,8 +54,24 @@ app.include_router(files.router)
 # WebSocket endpoint
 # ---------------------------------------------------------------------------
 
+ALLOWED_WS_ORIGINS = {
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5000",
+    "http://127.0.0.1:5000",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+}
+
+
 @app.websocket("/ws/progress")
 async def ws_progress(ws: WebSocket):
+    origin = ws.headers.get("origin")
+    if origin and origin not in ALLOWED_WS_ORIGINS:
+        logger.warning("Rejected WS connection from disallowed origin: %s", origin)
+        await ws.close(code=1008)
+        return
+
     await manager.connect(ws)
     try:
         while True:
@@ -82,9 +98,20 @@ if FRONTEND_DIST.exists():
         # Exclude API, WS, and Output paths
         if full_path.startswith(("api", "ws", "output")):
             return {"detail": "Not found"}
-        target = FRONTEND_DIST / full_path
+
+        frontend_root = FRONTEND_DIST.resolve()
+        target = (FRONTEND_DIST / full_path).resolve()
+
         if full_path and target.is_file():
+            try:
+                if not target.is_relative_to(frontend_root):
+                    return {"detail": "Not found"}
+            except AttributeError:
+                import os
+                if not str(target).startswith(str(frontend_root) + os.sep):
+                    return {"detail": "Not found"}
             return FileResponse(target)
+
         index_path = FRONTEND_DIST / "index.html"
         if index_path.exists():
             return FileResponse(index_path)

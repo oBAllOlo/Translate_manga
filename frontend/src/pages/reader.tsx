@@ -101,6 +101,8 @@ export default function ReaderPage() {
   const pages = chapter?.pages ?? [];
   const totalPages = pages.length;
   const currentPageInfo = pages[currentPage - 1];
+  const refinedPagesCount = pages.filter((p) => !!p.refined_text).length;
+  const chapterRefinePercent = Math.round((refinedPagesCount / (totalPages || 1)) * 100);
 
   const handleRefineCurrentPage = async (force = true) => {
     if (!slug || !currentPage) return;
@@ -624,15 +626,28 @@ export default function ReaderPage() {
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all cursor-pointer shadow-sm ${
               isRefinePanelOpen
                 ? "bg-fuchsia-600 text-white border-fuchsia-500 shadow-fuchsia-500/20"
-                : "bg-fuchsia-600/20 text-fuchsia-300 hover:bg-fuchsia-600 hover:text-white border-fuchsia-500/30"
+                : currentPageInfo?.refined_text
+                ? "bg-fuchsia-600/25 text-fuchsia-200 hover:bg-fuchsia-600 hover:text-white border-fuchsia-500/40 shadow-xs"
+                : "bg-secondary text-muted-foreground hover:text-foreground border-border"
             }`}
-            title="เปิด/ปิด หน้าต่างเปรียบเทียบสำนวน AI (Ollama TranslateGemma)"
+            title={
+              currentPageInfo?.refined_text
+                ? "หน้านี้มีคำแปลที่ขัดเกลาด้วย Ollama แล้ว — คลิกเพื่อเปิด/ปิดแผงเปรียบเทียบ"
+                : "เปิด/ปิด หน้าต่างเปรียบเทียบสำนวน AI (Ollama TranslateGemma)"
+            }
           >
-            <Sparkles className="w-3.5 h-3.5 text-fuchsia-400" />
+            <Sparkles className={`w-3.5 h-3.5 ${currentPageInfo?.refined_text ? "text-fuchsia-300" : "text-fuchsia-400/60"}`} />
             <span className="hidden sm:inline">สำนวน AI</span>
-            {currentPageInfo?.refined_text && (
-              <span className="w-1.5 h-1.5 rounded-full bg-fuchsia-300 animate-pulse" />
-            )}
+            {currentPageInfo?.refined_text ? (
+              <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-fuchsia-400/30 text-fuchsia-100 uppercase tracking-wider flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                Refined
+              </span>
+            ) : currentPageInfo?.original_text ? (
+              <span className="text-[10px] text-muted-foreground/70 hidden md:inline">
+                (Lens ดิบ)
+              </span>
+            ) : null}
           </button>
 
           {/* Fullscreen & Help */}
@@ -836,32 +851,53 @@ export default function ReaderPage() {
         {isRefinePanelOpen && (
           <aside className="w-80 sm:w-96 border-l border-border/80 bg-card/95 backdrop-blur-2xl flex flex-col h-full z-30 shadow-2xl shrink-0 animate-in slide-in-from-right duration-200">
             {/* Header */}
-            <div className="p-4 border-b border-border/70 flex items-center justify-between gap-3 shrink-0 bg-secondary/30">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-fuchsia-500/15 text-fuchsia-400 flex items-center justify-center border border-fuchsia-500/25 shadow-sm">
-                  <Sparkles className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-foreground">เปรียบเทียบสำนวน AI</h3>
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <span className="text-[11px] text-muted-foreground font-medium">
-                      หน้า {currentPage} จาก {totalPages}
-                    </span>
-                    {currentPageInfo?.refined_text && (
-                      <span className="px-1.5 py-0.2 rounded text-[10px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                        ขัดเกลาแล้ว
+            <div className="p-4 border-b border-border/70 flex flex-col gap-3 shrink-0 bg-secondary/30">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-fuchsia-500/15 text-fuchsia-400 flex items-center justify-center border border-fuchsia-500/25 shadow-sm">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-foreground">เปรียบเทียบสำนวน AI</h3>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span className="text-[11px] text-muted-foreground font-medium">
+                        หน้า {currentPage} จาก {totalPages}
                       </span>
-                    )}
+                      {currentPageInfo?.refined_text && (
+                        <span className="px-1.5 py-0.2 rounded text-[10px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                          ขัดเกลาแล้ว
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
+                <button
+                  onClick={() => setIsRefinePanelOpen(false)}
+                  className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+                  title="ปิดหน้าต่างเปรียบเทียบ"
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
-              <button
-                onClick={() => setIsRefinePanelOpen(false)}
-                className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
-                title="ปิดหน้าต่างเปรียบเทียบ"
-              >
-                <X className="w-4 h-4" />
-              </button>
+
+              {/* Progress bar of AI Refine for whole chapter */}
+              <div className="p-2.5 rounded-xl bg-secondary/70 border border-border/70 space-y-1.5">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="font-semibold text-fuchsia-300 flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-fuchsia-400" />
+                    ขัดเกลาทั้งตอนแล้ว
+                  </span>
+                  <span className="font-mono font-bold text-fuchsia-200">
+                    {refinedPagesCount}/{totalPages} หน้า ({chapterRefinePercent}%)
+                  </span>
+                </div>
+                <div className="w-full bg-black/40 rounded-full h-1.5 overflow-hidden">
+                  <div
+                    className="bg-gradient-to-r from-fuchsia-500 via-pink-500 to-violet-500 h-1.5 rounded-full transition-all duration-300"
+                    style={{ width: `${chapterRefinePercent}%` }}
+                  />
+                </div>
+              </div>
             </div>
 
             {/* Content Body */}
@@ -1044,9 +1080,27 @@ export default function ReaderPage() {
             <ChevronRight className="w-4 h-4" />
           </button>
 
-          <span className="text-xs font-mono text-muted-foreground min-w-[50px] text-right select-none">
-            {currentPage} / {totalPages}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-mono text-muted-foreground min-w-[50px] text-right select-none">
+              {currentPage} / {totalPages}
+            </span>
+            {currentPageInfo?.refined_text ? (
+              <span
+                className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30"
+                title={`หน้านี้ผ่านการขัดเกลาสำนวนด้วย Ollama แล้ว (ทั้งตอนเกลาแล้ว ${refinedPagesCount}/${totalPages} หน้า หรือ ${chapterRefinePercent}%)`}
+              >
+                <Sparkles className="w-2.5 h-2.5 text-fuchsia-400" />
+                <span>Ollama Refined ({chapterRefinePercent}%)</span>
+              </span>
+            ) : currentPageInfo?.has_translation ? (
+              <span
+                className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-secondary text-muted-foreground/80 border border-border/80"
+                title={`หน้านี้เป็นคำแปลดิบจาก Google Lens (ทั้งตอนเกลาแล้ว ${chapterRefinePercent}%)`}
+              >
+                <span>Lens ดิบ (เกลา {chapterRefinePercent}%)</span>
+              </span>
+            ) : null}
+          </div>
         </div>
 
         <div className="flex items-center gap-2">

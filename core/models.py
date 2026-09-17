@@ -45,3 +45,25 @@ def extract_page_text(row: dict | None) -> str:
         return ""
     return str(row.get("thai") or row.get("text") or "").strip()
 
+
+def resolve_safe_chapter_dir(name: str, root: Path) -> Path:
+    """Safely resolve and validate a chapter directory path under root.
+
+    Raises ValueError if the name contains invalid characters, is empty,
+    or attempts directory traversal outside of root.
+    """
+    cleaned = (name or "").strip()
+    if not cleaned or ".." in cleaned or "/" in cleaned or "\\" in cleaned:
+        raise ValueError(f"Invalid chapter identifier: {name!r}")
+    target = (root / cleaned).resolve()
+    root_resolved = root.resolve()
+    try:
+        is_safe = target != root_resolved and target.is_relative_to(root_resolved)
+    except AttributeError:
+        import os
+        is_safe = target != root_resolved and str(target).startswith(str(root_resolved) + os.sep)
+    if not is_safe:
+        raise ValueError(f"Chapter path escapes output directory: {name!r}")
+    return target
+
+
