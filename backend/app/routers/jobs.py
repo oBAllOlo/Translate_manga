@@ -7,6 +7,8 @@ from datetime import datetime
 
 from fastapi import APIRouter, HTTPException
 
+import logging
+
 from backend.app.models.database import get_db, get_all_jobs, insert_job
 from backend.app.models.schemas import JobCreate, RangeJobCreate, JobResponse
 from backend.app.services.job_runner import (
@@ -17,6 +19,8 @@ from backend.app.services.job_runner import (
     cancel_all_job_tasks,
 )
 from backend.app.ws.progress import manager
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
@@ -53,6 +57,7 @@ async def create_job(body: JobCreate):
         await insert_job(db, job_id, url)
     finally:
         await db.close()
+    logger.info("Queued download/translate job %s for URL: %s", job_id, url)
     task = asyncio.create_task(run_single_job(job_id, url, body.chunk, body.concurrency))
     register_job_task(job_id, task)
     return {"id": job_id}
@@ -86,6 +91,7 @@ async def create_range_job(body: RangeJobCreate):
         await insert_job(db, job_id, f"{base_url} [ch {body.start}-{body.end}]", is_range=True)
     finally:
         await db.close()
+    logger.info("Queued range job %s for URL: %s (chapters %d-%d)", job_id, base_url, body.start, body.end)
     task = asyncio.create_task(run_range_job(job_id, base_url, body.start, body.end, body.chunk, body.concurrency))
     register_job_task(job_id, task)
     return {"id": job_id}
@@ -95,6 +101,7 @@ async def create_range_job(body: RangeJobCreate):
 async def cancel_all_jobs():
     """Cancel all running jobs."""
     count = await cancel_all_job_tasks()
+    logger.info("Cancelled all active jobs (%d tasks stopped)", count)
     db = await get_db()
     try:
         await db.execute(
@@ -111,6 +118,7 @@ async def cancel_all_jobs():
 async def cancel_single_job(job_id: str):
     """Cancel a single running job."""
     cancelled = await cancel_job_task(job_id)
+    logger.info("Cancelled job %s (running task found: %s)", job_id, cancelled)
     db = await get_db()
     try:
         await db.execute(
@@ -147,6 +155,7 @@ async def delete_completed_jobs(all: bool = False):
 async def delete_job(job_id: str):
     """Delete a single job by id, cancelling it first if running."""
     await cancel_job_task(job_id)
+    logger.info("Deleted job %s", job_id)
     db = await get_db()
     try:
         await db.execute("DELETE FROM jobs WHERE id = ?", (job_id,))

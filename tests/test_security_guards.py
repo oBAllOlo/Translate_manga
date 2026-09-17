@@ -102,7 +102,7 @@ class TestSecurityGuards(unittest.TestCase):
             with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
                 mock_resp = MagicMock(status_code=200)
                 mock_resp.json.return_value = {
-                    "message": {"content": "<dialogue>\nสวัสดีครับ\n</dialogue>"}
+                    "choices": [{"message": {"content": "<dialogue>\nสวัสดีครับ\n</dialogue>"}}]
                 }
                 mock_post.return_value = mock_resp
 

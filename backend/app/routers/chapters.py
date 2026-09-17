@@ -12,6 +12,8 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
+from fastapi.responses import StreamingResponse
+
 from backend.app.models.database import get_db, insert_job
 from backend.app.models.schemas import (
     ChapterSummary, ChapterDetail, SeriesGroup, PageInfo,
@@ -24,7 +26,16 @@ from backend.app.services.job_runner import (
     register_job_task,
 )
 from core.models import IMAGE_EXTENSIONS, read_json, extract_page_text, resolve_safe_chapter_dir
-from core.refine import refine_single_page, OllamaConnectionError, OllamaModelError, OllamaError
+from core.refine import (
+    refine_single_page,
+    stream_refine_page,
+    OpenRouterError,
+    OpenRouterAuthError,
+    OpenRouterRateLimitError,
+)
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/chapters", tags=["chapters"])
 
@@ -227,6 +238,8 @@ async def get_chapter(name: str):
             "has_translation": bool(tr.get("translated_file")),
             "original_text": orig_text,
             "refined_text": ref_text,
+            "reasoning_details": rf.get("reasoning_details"),
+            "provider": rf.get("provider"),
         })
 
     loop = asyncio.get_event_loop()
@@ -259,6 +272,7 @@ async def translate_chapter(name: str):
     finally:
         await db.close()
 
+    logger.info("Queued re-translate job %s for chapter '%s'", job_id, name)
     task = asyncio.create_task(run_translate_job(job_id, name))
     register_job_task(job_id, task)
     return {"job_id": job_id}
@@ -281,6 +295,7 @@ async def retry_chapter(name: str):
     finally:
         await db.close()
 
+    logger.info("Queued retry job %s for chapter '%s' (%d pages)", job_id, name, len(failed))
     task = asyncio.create_task(run_retry_job(job_id, name, [int(p) for p in failed]))
     register_job_task(job_id, task)
     return {"job_id": job_id}
@@ -307,6 +322,7 @@ async def delete_chapter(name: str):
     if target.resolve().parent != OUTPUT_ROOT.resolve():
         raise HTTPException(400, "Invalid path")
     _safe_rmtree(target)
+    logger.info("Deleted chapter directory '%s'", name)
     external_pdf = PDF_ROOT / f"{name}.pdf"
     if external_pdf.exists():
         try:
@@ -457,7 +473,17 @@ async def refine_chapter(name: str, payload: RefineRequest = RefineRequest()):
     finally:
         await db.close()
 
-    task = asyncio.create_task(run_refine_job(job_id, name, force=payload.force))
+    logger.info("Queued refine job %s for chapter '%s' (model=%s, force=%s)", job_id, name, payload.model, payload.force)
+    task = asyncio.create_task(
+        run_refine_job(
+            job_id,
+            name,
+            force=payload.force,
+            provider=payload.provider,
+            api_key=payload.api_key,
+            model=payload.model,
+        )
+    )
     register_job_task(job_id, task)
     return {"job_id": job_id}
 
@@ -476,13 +502,51 @@ async def refine_page(name: str, page_no: int, payload: RefineRequest = RefineRe
         raise HTTPException(400, "Chapter has not been translated yet")
 
     try:
-        res = await refine_single_page(target, page_no=page_no, force=payload.force)
+        logger.info("Synchronous refine request: chapter='%s', page=%d (model=%s)", name, page_no, payload.model)
+        res = await refine_single_page(
+            target,
+            page_no=page_no,
+            force=payload.force,
+            provider=payload.provider,
+            api_key=payload.api_key,
+            model=payload.model,
+            user_instruction=payload.user_instruction,
+        )
         return res
-    except OllamaConnectionError as exc:
-        raise HTTPException(503, f"Ollama connection error: {exc}")
-    except OllamaModelError as exc:
-        raise HTTPException(400, f"Ollama model error: {exc}")
+    except OpenRouterAuthError as exc:
+        raise HTTPException(401, f"OpenRouter auth error: {exc}")
+    except OpenRouterRateLimitError as exc:
+        raise HTTPException(429, f"OpenRouter rate limit exceeded: {exc}")
+    except OpenRouterError as exc:
+        raise HTTPException(502, f"OpenRouter error: {exc}")
     except Exception as exc:
         raise HTTPException(500, f"Refine failed: {exc}")
+
+
+@router.post("/{name}/pages/{page_no}/refine/stream")
+async def refine_page_stream(name: str, page_no: int, payload: RefineRequest = RefineRequest()):
+    """Stream reasoning tokens and refined translation for a page via Server-Sent Events."""
+    if page_no < 1:
+        raise HTTPException(400, "page_no must be >= 1")
+    target = _resolve_chapter_dir(name)
+    if not target.exists() or not target.is_dir():
+        raise HTTPException(404, "Chapter not found")
+
+    lens_file = target / "lens_translations.json"
+    if not lens_file.exists():
+        raise HTTPException(400, "Chapter has not been translated yet")
+
+    logger.info("Streaming refine request: chapter='%s', page=%d (model=%s)", name, page_no, payload.model)
+    return StreamingResponse(
+        stream_refine_page(
+            work_dir=target,
+            page_no=page_no,
+            provider=payload.provider,
+            api_key=payload.api_key,
+            model=payload.model,
+            user_instruction=payload.user_instruction,
+        ),
+        media_type="text/event-stream",
+    )
 
 

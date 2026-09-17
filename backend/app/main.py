@@ -12,20 +12,27 @@ from backend.app.models.database import init_db
 from backend.app.routers import jobs, chapters, files
 from backend.app.ws.progress import manager
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(name)s  %(message)s")
+from dotenv import load_dotenv
+from backend.app.logging_config import setup_logging
+
+load_dotenv()
+setup_logging()
+
 logger = logging.getLogger(__name__)
 
 OUTPUT_ROOT = Path(__file__).resolve().parent.parent.parent / "output"
 
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
+    setup_logging()
     OUTPUT_ROOT.mkdir(exist_ok=True)
     await init_db()
-    logger.info("Manga Translate API ready")
+    logger.info("Manga Translate API ready (OpenRouter Nemotron Refine)")
     yield
-    logger.info("Shutting down")
+    logger.info("Manga Translate API shutting down")
 
 
 app = FastAPI(

@@ -96,6 +96,8 @@ export interface PageInfo {
   has_translation: boolean;
   original_text?: string;
   refined_text?: string;
+  reasoning_details?: any;
+  provider?: string;
 }
 
 export interface ChapterDetail {
@@ -115,9 +117,12 @@ export interface RefinePageResponse {
   page: number;
   original_text: string;
   refined_text: string;
+  reasoning_details?: any;
+  provider?: string;
   model: string;
   cached: boolean;
   error?: string | null;
+  history?: any[];
 }
 
 export const fetchChapters = () =>
@@ -128,19 +133,96 @@ export const translateChapter = (name: string) =>
   request<{ job_id: string }>(`/api/chapters/${encodeURIComponent(name)}/translate`, { method: "POST" });
 export const retryChapter = (name: string) =>
   request<{ job_id: string }>(`/api/chapters/${encodeURIComponent(name)}/retry`, { method: "POST" });
-export const refineChapter = (name: string, force = false) =>
+export const refineChapter = (name: string, force = false, provider?: string, apiKey?: string) =>
   request<{ job_id: string }>(`/api/chapters/${encodeURIComponent(name)}/refine`, {
     method: "POST",
-    body: JSON.stringify({ force }),
+    body: JSON.stringify({ force, provider, api_key: apiKey }),
   });
-export const refineChapterPage = (name: string, page: number, force = false) =>
+export const refineChapterPage = (
+  name: string,
+  page: number,
+  force = false,
+  options?: { provider?: string; apiKey?: string; userInstruction?: string; model?: string }
+) =>
   request<RefinePageResponse>(
     `/api/chapters/${encodeURIComponent(name)}/pages/${page}/refine`,
     {
       method: "POST",
-      body: JSON.stringify({ force }),
+      body: JSON.stringify({
+        force,
+        provider: options?.provider,
+        api_key: options?.apiKey,
+        user_instruction: options?.userInstruction,
+        model: options?.model,
+      }),
     }
   );
+
+export async function streamRefineChapterPage(
+  name: string,
+  page: number,
+  options: {
+    provider?: string;
+    apiKey?: string;
+    userInstruction?: string;
+    model?: string;
+    onReasoning?: (delta: string) => void;
+    onContent?: (delta: string) => void;
+    onDone?: (data: any) => void;
+    onError?: (err: string) => void;
+  }
+) {
+  const resp = await fetch(`/api/chapters/${encodeURIComponent(name)}/pages/${page}/refine/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      provider: options.provider,
+      api_key: options.apiKey,
+      user_instruction: options.userInstruction,
+      model: options.model,
+    }),
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text();
+    options.onError?.(text || `HTTP error ${resp.status}`);
+    return;
+  }
+
+  const reader = resp.body?.getReader();
+  if (!reader) return;
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n\n");
+    buffer = lines.pop() || "";
+
+    for (const block of lines) {
+      if (!block.trim()) continue;
+      const eventMatch = block.match(/^event:\s*(\w+)/m);
+      const dataMatch = block.match(/^data:\s*(.+)$/m);
+      const event = eventMatch ? eventMatch[1] : "message";
+      if (!dataMatch) continue;
+      try {
+        const data = JSON.parse(dataMatch[1]);
+        if (event === "reasoning") {
+          options.onReasoning?.(data.delta);
+        } else if (event === "content") {
+          options.onContent?.(data.delta);
+        } else if (event === "done") {
+          options.onDone?.(data);
+        } else if (event === "error") {
+          options.onError?.(data.error);
+        }
+      } catch {}
+    }
+  }
+}
+
 export const deleteChapter = (name: string) =>
   request<{ deleted: string }>(`/api/chapters/${encodeURIComponent(name)}`, { method: "DELETE" });
 export const deleteAllChapters = () =>

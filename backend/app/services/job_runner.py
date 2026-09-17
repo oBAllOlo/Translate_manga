@@ -42,6 +42,13 @@ from core.models import (
 from core.parsers import parse_source
 from core.pdf import make_long_strip_pdf
 from core.translate import LENS_CORE_DIR, save_data_url, lens_translate_work_dir
+from core.downloader import (
+    _get_session,
+    _fetch_image,
+    _mangadex_fallback,
+    _unwrap_spoilerhat,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -455,6 +462,7 @@ async def run_single_job(job_id: str, url: str, chunk_size: int, concurrency: in
     db = await get_db()
     throttle = _ProgressThrottle(interval=1.5)
     try:
+        logger.info("[Job %s] Starting download & translation job for URL: %s", job_id, url)
         await _update_and_broadcast(db, job_id, status="parsing", message="กำลังอ่าน URL")
 
         loop = asyncio.get_running_loop()
@@ -466,6 +474,7 @@ async def run_single_job(job_id: str, url: str, chunk_size: int, concurrency: in
         work_dir.mkdir(parents=True, exist_ok=True)
 
         total_p = len(pages)
+        logger.info("[Job %s] Parsed '%s' (%d pages, slug: '%s')", job_id, title, total_p, chapter_slug)
         dl_done = 0
         tr_done = 0
         tr_fails = 0
@@ -532,6 +541,10 @@ async def run_single_job(job_id: str, url: str, chunk_size: int, concurrency: in
         )
 
         rel_pdf = f"pdfs/{chapter_slug}.pdf" if (pdf_path and Path(pdf_path).exists()) else None
+        logger.info(
+            "[Job %s] Completed '%s': %d/%d pages translated (%d failed), PDF: %s",
+            job_id, chapter_slug, ok, total_p, failed, rel_pdf
+        )
         await _update_and_broadcast(
             db, job_id,
             status="done",
@@ -561,6 +574,10 @@ async def run_range_job(
     throttle = _ProgressThrottle(interval=1.5)
     try:
         chapters = list(range(start, end + 1))
+        logger.info(
+            "[Job %s] Starting range job for chapters %d-%d (%d chapters) from %s",
+            job_id, start, end, len(chapters), base_url
+        )
         base = base_url if base_url.endswith("-") else base_url.rstrip("/") + "/"
         await _update_and_broadcast(
             db, job_id,
@@ -573,6 +590,7 @@ async def run_range_job(
 
         for done_count, n in enumerate(chapters, start=1):  # O(1) — no list scan per iteration
             chapter_url = f"{base}chapter-{n}/"
+            logger.info("[Job %s] Processing chapter %d/%d: %s", job_id, done_count, len(chapters), chapter_url)
             await _update_and_broadcast(
                 db, job_id, status="parsing", message=f"Chapter {n}", current_chapter=n,
             )
@@ -679,6 +697,7 @@ async def run_translate_job(
     db = await get_db()
     throttle = _ProgressThrottle(interval=1.5)
     try:
+        logger.info("[Job %s] Starting re-translation job for chapter '%s'", job_id, chapter_slug)
         work_dir = resolve_safe_chapter_dir(chapter_slug, OUTPUT_ROOT)
         await _update_and_broadcast(db, job_id, status="translating", message=f"แปล {chapter_slug}")
 
@@ -704,6 +723,10 @@ async def run_translate_job(
             None, make_long_strip_pdf, work_dir, PDF_ROOT / f"{chapter_slug}.pdf", True, chunk_size, 190
         )
         rel_pdf = f"pdfs/{chapter_slug}.pdf" if final_pdf and Path(final_pdf).exists() else None
+        logger.info(
+            "[Job %s] Completed re-translation for '%s': %d/%d pages translated (%d failed), PDF: %s",
+            job_id, chapter_slug, ok, len(results), failed, rel_pdf
+        )
         await _update_and_broadcast(
             db, job_id, status="done", translated=ok, failed=failed,
             pdf=rel_pdf, message="เสร็จแล้ว",
@@ -724,6 +747,7 @@ async def run_retry_job(job_id: str, chapter_slug: str, failed_pages: list[int])
     db = await get_db()
     throttle = _ProgressThrottle(interval=1.5)
     try:
+        logger.info("[Job %s] Starting retry job for chapter '%s' (%d pages: %s)", job_id, chapter_slug, len(failed_pages), failed_pages)
         work_dir = resolve_safe_chapter_dir(chapter_slug, OUTPUT_ROOT)
         await _update_and_broadcast(
             db, job_id, status="translating",
@@ -746,6 +770,10 @@ async def run_retry_job(job_id: str, chapter_slug: str, failed_pages: list[int])
             on_progress=on_retry_progress,
         )
         ok = sum(1 for r in results if r.get("translated_file"))
+        logger.info(
+            "[Job %s] Completed retry for '%s': %d/%d pages succeeded (%d failed)",
+            job_id, chapter_slug, ok, len(results), len(results) - ok
+        )
         await _update_and_broadcast(
             db, job_id, status="done", translated=ok, failed=len(results) - ok,
             message=f"Retry เสร็จ: {ok} สำเร็จ",
@@ -761,20 +789,29 @@ async def run_retry_job(job_id: str, chapter_slug: str, failed_pages: list[int])
         await db.close()
 
 
-async def run_refine_job(job_id: str, chapter_slug: str, force: bool = False) -> None:
-    """Refine Thai translations in background using local Ollama TranslateGemma."""
+async def run_refine_job(
+    job_id: str,
+    chapter_slug: str,
+    force: bool = False,
+    provider: str | None = None,
+    api_key: str | None = None,
+    model: str | None = None,
+) -> None:
+    """Refine Thai translations in background using OpenRouter."""
     db = await get_db()
     throttle = _ProgressThrottle(interval=1.5)
     try:
+        logger.info("[Job %s] Starting refine job for chapter '%s' (model=%s, force=%s)", job_id, chapter_slug, model or "default", force)
         work_dir = resolve_safe_chapter_dir(chapter_slug, OUTPUT_ROOT)
         if not work_dir.exists():
             raise FileNotFoundError(f"Chapter directory {chapter_slug} not found")
 
         await _update_and_broadcast(
-            db, job_id, status="refining", message=f"ขัดเกลาสำนวน AI: {chapter_slug}"
+            db, job_id, status="refining", message=f"ขัดเกลาสำนวน AI (OpenRouter): {chapter_slug}"
         )
 
         async def on_refine_progress(done: int, total: int) -> None:
+            logger.info("[Job %s] Refine progress '%s': %d/%d pages", job_id, chapter_slug, done, total)
             await throttle.maybe_send(
                 db, job_id,
                 status="refining",
@@ -788,9 +825,17 @@ async def run_refine_job(job_id: str, chapter_slug: str, force: bool = False) ->
             work_dir,
             force=force,
             on_progress=on_refine_progress,
+            provider="openrouter",
+            api_key=api_key,
+            model=model,
         )
+
         ok = sum(1 for r in results if not r.get("error"))
         failed = len(results) - ok
+        logger.info(
+            "[Job %s] Completed refine for '%s': %d/%d pages refined (%d errors)",
+            job_id, chapter_slug, ok, len(results), failed
+        )
         await _update_and_broadcast(
             db, job_id,
             status="done",
@@ -800,10 +845,10 @@ async def run_refine_job(job_id: str, chapter_slug: str, force: bool = False) ->
         )
         await manager.broadcast("chapter_changed", {"slug": chapter_slug})
     except asyncio.CancelledError:
-        logger.info("Refine job %s was cancelled", job_id)
+        logger.info("[Job %s] Refine job was cancelled", job_id)
         await _update_and_broadcast(db, job_id, status="error", message="ยกเลิกการทำงานแล้ว (Cancelled)")
     except Exception as exc:
-        logger.exception("Refine job %s failed", job_id)
+        logger.exception("[Job %s] Refine job failed: %s", job_id, exc)
         await _update_and_broadcast(db, job_id, status="error", message=f"{type(exc).__name__}: {exc}")
     finally:
         await db.close()

@@ -139,7 +139,7 @@ export function ChapterDrawer({ onRefresh }: { onRefresh: () => void }) {
     setConfirmModal({
       isOpen: true,
       title: "ยืนยันการขัดเกลาสำนวนด้วย AI",
-      description: `ต้องการเริ่มขัดเกลาสำนวนภาษาไทยด้วย Ollama TranslateGemma ทั้งหมด ${target.length} ตอนใช่หรือไม่?`,
+      description: `ต้องการเริ่มขัดเกลาสำนวนภาษาไทยด้วย OpenRouter AI ทั้งหมด ${target.length} ตอนใช่หรือไม่?`,
       confirmText: "เริ่มขัดเกลาทั้งหมด",
       onConfirm: async () => {
         setBatchLoading(true);
@@ -304,7 +304,7 @@ export function ChapterDrawer({ onRefresh }: { onRefresh: () => void }) {
                     <div className="flex justify-between text-[11px] text-muted-foreground">
                       <span className="flex items-center gap-1 text-fuchsia-300">
                         <Sparkles className="w-3 h-3 text-fuchsia-400" />
-                        ขัดเกลาสำนวน (Ollama AI)
+                        ขัดเกลาสำนวน (OpenRouter AI)
                       </span>
                       <span className="font-mono font-medium text-fuchsia-300">{refinePercent}%</span>
                     </div>
@@ -345,7 +345,7 @@ export function ChapterDrawer({ onRefresh }: { onRefresh: () => void }) {
                   onClick={handleBatchRefine}
                   disabled={batchLoading}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-fuchsia-600/20 text-fuchsia-300 border border-fuchsia-500/30 text-xs font-semibold hover:bg-fuchsia-600 hover:text-white active:scale-95 transition-all disabled:opacity-50 cursor-pointer"
-                  title="ขัดเกลาสำนวนไทยด้วย AI (Ollama TranslateGemma)"
+                  title="ขัดเกลาสำนวนไทยด้วย AI (OpenRouter Nemotron)"
                 >
                   <Sparkles className="w-3.5 h-3.5 text-fuchsia-400" />
                   ขัดเกลาสำนวน AI ({translatedCount})
@@ -450,7 +450,7 @@ export function ChapterDrawer({ onRefresh }: { onRefresh: () => void }) {
                           }`}
                           title={
                             ch.has_refined
-                              ? "แปลไทย + ขัดเกลาสำนวนด้วย AI (Ollama) แล้ว"
+                              ? "แปลไทย + ขัดเกลาสำนวนด้วย AI (OpenRouter) แล้ว"
                               : isTrans
                               ? "แปลไทยแล้ว (Google Lens ดิบ)"
                               : "ยังไม่ได้แปล (อังกฤษ)"
@@ -489,7 +489,7 @@ export function ChapterDrawer({ onRefresh }: { onRefresh: () => void }) {
                           {ch.has_refined ? (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/35 shadow-xs">
                               <Sparkles className="w-2.5 h-2.5 text-fuchsia-400" />
-                              เกลาแล้ว {ch.refined_count ? `${ch.refined_count}/${ch.page_count || ch.translated_count} หน้า (${Math.round((ch.refined_count / (ch.page_count || ch.translated_count || 1)) * 100)}%)` : "Ollama"}
+                              เกลาแล้ว {ch.refined_count ? `${ch.refined_count}/${ch.page_count || ch.translated_count} หน้า (${Math.round((ch.refined_count / (ch.page_count || ch.translated_count || 1)) * 100)}%)` : "OpenRouter"}
                             </span>
                           ) : isTrans ? (
                             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-secondary/80 text-muted-foreground border border-border/80">
@@ -570,7 +570,7 @@ export function ChapterDrawer({ onRefresh }: { onRefresh: () => void }) {
                               ? "bg-fuchsia-500/15 text-fuchsia-300 hover:bg-fuchsia-500/30 border-fuchsia-500/30 shadow-xs"
                               : "bg-secondary text-muted-foreground hover:text-fuchsia-300 hover:bg-card border-border"
                           }`}
-                          title={ch.has_refined ? "ขัดเกลาสำนวนซ้ำด้วย AI (Ollama TranslateGemma)" : "ขัดเกลาสำนวนไทยด้วย AI (Ollama TranslateGemma)"}
+                          title={ch.has_refined ? "ขัดเกลาสำนวนซ้ำด้วย AI (OpenRouter Nemotron)" : "ขัดเกลาสำนวนไทยด้วย AI (OpenRouter Nemotron)"}
                         >
                           <Sparkles className={`w-3.5 h-3.5 ${ch.has_refined ? "text-fuchsia-400 fill-fuchsia-400/20" : "text-fuchsia-400/70"}`} />
                           <span className="hidden xl:inline text-[11px]">{ch.has_refined ? "เกลาซ้ำ" : "เกลา AI"}</span>

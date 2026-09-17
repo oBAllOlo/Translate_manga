@@ -77,7 +77,8 @@ class TestRouterRefine(unittest.TestCase):
             "page": 1,
             "original_text": "สวัสดีจากเลนส์",
             "refined_text": "สวัสดีครับผม",
-            "model": "translategemma:12b",
+            "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+            "provider": "openrouter",
             "cached": False,
         }
         with patch("backend.app.routers.chapters.refine_single_page", new_callable=AsyncMock) as mock_refine:
@@ -91,6 +92,57 @@ class TestRouterRefine(unittest.TestCase):
             self.assertEqual(data["page"], 1)
             self.assertEqual(data["refined_text"], "สวัสดีครับผม")
 
+    def test_post_refine_page_with_openrouter_and_instruction(self):
+
+        mock_res = {
+            "page": 1,
+            "original_text": "สวัสดีจากเลนส์",
+            "refined_text": "สวัสดีครับท่านหัวหน้า",
+            "reasoning_details": [{"step": "thought_ok"}],
+            "provider": "openrouter",
+            "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+            "cached": False,
+        }
+        with patch("backend.app.routers.chapters.refine_single_page", new_callable=AsyncMock) as mock_refine:
+            mock_refine.return_value = mock_res
+            resp = self.client.post(
+                f"/api/chapters/{self.test_chapter}/pages/1/refine",
+                json={
+                    "force": True,
+                    "provider": "openrouter",
+                    "api_key": "test-key-123",
+                    "user_instruction": "ทำให้เป็นทางการ",
+                }
+            )
+            self.assertEqual(resp.status_code, 200)
+            data = resp.json()
+            self.assertEqual(data["refined_text"], "สวัสดีครับท่านหัวหน้า")
+            self.assertEqual(data["provider"], "openrouter")
+            self.assertEqual(data["reasoning_details"], [{"step": "thought_ok"}])
+
+            # Verify arguments passed to core
+            mock_refine.assert_called_once()
+            call_kwargs = mock_refine.call_args[1]
+            self.assertEqual(call_kwargs["provider"], "openrouter")
+            self.assertEqual(call_kwargs["api_key"], "test-key-123")
+            self.assertEqual(call_kwargs["user_instruction"], "ทำให้เป็นทางการ")
+
+    def test_post_refine_page_stream_endpoint(self):
+        async def fake_stream(*args, **kwargs):
+            yield "event: start\ndata: {\"provider\": \"openrouter\"}\n\n"
+            yield "event: content\ndata: {\"delta\": \"สวัสดี\"}\n\n"
+            yield "event: done\ndata: {\"refined_text\": \"สวัสดี\"}\n\n"
+
+        with patch("backend.app.routers.chapters.stream_refine_page", side_effect=fake_stream):
+            resp = self.client.post(
+                f"/api/chapters/{self.test_chapter}/pages/1/refine/stream",
+                json={"provider": "openrouter"}
+            )
+            self.assertEqual(resp.status_code, 200)
+            self.assertIn("text/event-stream", resp.headers["content-type"])
+            self.assertIn("event: content", resp.text)
+
 
 if __name__ == "__main__":
     unittest.main()
+

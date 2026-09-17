@@ -2,7 +2,16 @@
 import { useEffect, useCallback, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchChapter, fetchChapters, resolvePdfUrl, refineChapter, refineChapterPage, type ChapterDetail } from "@/api/client";
+import {
+  fetchChapter,
+  fetchChapters,
+  resolvePdfUrl,
+  refineChapter,
+  refineChapterPage,
+  streamRefineChapterPage,
+  type ChapterDetail,
+} from "@/api/client";
+
 import { useReaderStore, type ReaderMode } from "@/stores/reader-store";
 import { useUIStore } from "@/stores/ui-store";
 import {
@@ -15,6 +24,8 @@ import {
   EyeOff,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Columns2,
   Rows3,
   BookOpen,
@@ -31,7 +42,11 @@ import {
   Copy,
   Check,
   Languages,
+  Brain,
+  Send,
+  Settings2,
 } from "lucide-react";
+
 import TouchupModal from "@/components/TouchupModal";
 
 export default function ReaderPage() {
@@ -72,6 +87,12 @@ export default function ReaderPage() {
   const [refineError, setRefineError] = useState<string | null>(null);
   const [copiedOriginal, setCopiedOriginal] = useState(false);
   const [copiedRefined, setCopiedRefined] = useState(false);
+  const [openRouterKey, setOpenRouterKey] = useState(() => localStorage.getItem("openrouter_api_key") || "");
+  const [showKeyInput, setShowKeyInput] = useState(false);
+  const [isReasoningExpanded, setIsReasoningExpanded] = useState(false);
+  const [streamingReasoning, setStreamingReasoning] = useState("");
+  const [streamingContent, setStreamingContent] = useState("");
+  const [userTouchupPrompt, setUserTouchupPrompt] = useState("");
 
   // Fullscreen toggle
   const toggleFullscreen = useCallback(() => {
@@ -104,56 +125,77 @@ export default function ReaderPage() {
   const refinedPagesCount = pages.filter((p) => !!p.refined_text).length;
   const chapterRefinePercent = Math.round((refinedPagesCount / (totalPages || 1)) * 100);
 
-  const handleRefineCurrentPage = async (force = true) => {
+  const handleRefineCurrentPage = async (force = true, customInstruction?: string) => {
     if (!slug || !currentPage) return;
     setIsRefiningPage(true);
     setRefineError(null);
+    setStreamingReasoning("");
+    setStreamingContent("");
+
     try {
-      const res = await refineChapterPage(slug, currentPage, force);
-      if (res.error) {
-        setRefineError(res.error);
-        showToast(res.error, "error");
-      } else {
-        showToast(`ขัดเกลาสำนวนหน้า ${currentPage} สำเร็จแล้ว`, "success");
-      }
-      queryClient.setQueryData(["chapter", slug], (old: ChapterDetail | undefined) => {
-        if (!old) return old;
-        const updatedPages = old.pages.map((p) => {
-          if (p.page === currentPage) {
-            return {
-              ...p,
-              original_text: res.original_text || p.original_text,
-              refined_text: res.refined_text,
-            };
-          }
-          return p;
-        });
-        return {
-          ...old,
-          has_refined: true,
-          pages: updatedPages,
-        };
+      let finalDone: any = null;
+      await streamRefineChapterPage(slug, currentPage, {
+        provider: "openrouter",
+        apiKey: openRouterKey || undefined,
+        userInstruction: customInstruction,
+        onReasoning: (delta) => {
+          setStreamingReasoning((prev) => prev + delta);
+        },
+        onContent: (delta) => {
+          setStreamingContent((prev) => prev + delta);
+        },
+        onDone: (data) => {
+          finalDone = data;
+        },
+        onError: (err) => {
+          setRefineError(err);
+          showToast(err, "error");
+        },
       });
+
+      if (finalDone) {
+        showToast(`ขัดเกลาสำนวนหน้า ${currentPage} สำเร็จแล้ว`, "success");
+        queryClient.setQueryData(["chapter", slug], (old: ChapterDetail | undefined) => {
+          if (!old) return old;
+          const updatedPages = old.pages.map((p) => {
+            if (p.page === currentPage) {
+              return {
+                ...p,
+                refined_text: finalDone.refined_text,
+                reasoning_details: finalDone.reasoning_details,
+                provider: "openrouter",
+              };
+            }
+            return p;
+          });
+          return {
+            ...old,
+            has_refined: true,
+            pages: updatedPages,
+          };
+        });
+      }
     } catch (err: any) {
       const msg = err.message || "เกิดข้อผิดพลาดในการขัดเกลาสำนวน";
       setRefineError(msg);
       showToast(msg, "error");
     } finally {
       setIsRefiningPage(false);
+      setUserTouchupPrompt("");
     }
   };
 
   const handleRefineWholeChapter = async () => {
     if (!slug) return;
     try {
-      await refineChapter(slug);
-      queryClient.invalidateQueries({ queryKey: ["chapter", slug] });
+      await refineChapter(slug, false, "openrouter", openRouterKey || undefined);
+      showToast("เริ่มงานขัดเกลาทั้งตอน (OpenRouter) แล้ว", "info");
       queryClient.invalidateQueries({ queryKey: ["chapters"] });
-      showToast("เริ่มงานขัดเกลาทุกหน้าในเบื้องหลังแล้ว ติดตามความคืบหน้าได้ที่ Dashboard", "success");
     } catch (err: any) {
-      showToast("เกิดข้อผิดพลาด: " + err.message, "error");
+      showToast(err.message || "ไม่สามารถเริ่มงานขัดเกลาได้", "error");
     }
   };
+
 
   const handleCopy = (text: string, isRefined: boolean) => {
     if (!text) return;
@@ -632,8 +674,8 @@ export default function ReaderPage() {
             }`}
             title={
               currentPageInfo?.refined_text
-                ? "หน้านี้มีคำแปลที่ขัดเกลาด้วย Ollama แล้ว — คลิกเพื่อเปิด/ปิดแผงเปรียบเทียบ"
-                : "เปิด/ปิด หน้าต่างเปรียบเทียบสำนวน AI (Ollama TranslateGemma)"
+                ? "หน้านี้มีคำแปลที่ขัดเกลาด้วย OpenRouter AI แล้ว — คลิกเพื่อเปิด/ปิดแผงเปรียบเทียบ"
+                : "เปิด/ปิด หน้าต่างเปรียบเทียบสำนวน AI (OpenRouter Nemotron)"
             }
           >
             <Sparkles className={`w-3.5 h-3.5 ${currentPageInfo?.refined_text ? "text-fuchsia-300" : "text-fuchsia-400/60"}`} />
@@ -948,37 +990,84 @@ export default function ReaderPage() {
                 </div>
               </div>
 
-              {/* 2. Ollama TranslateGemma Refined Text Card */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold text-fuchsia-300 uppercase tracking-wider flex items-center gap-1">
-                    <Sparkles className="w-3 h-3 text-fuchsia-400" />
-                    Ollama TranslateGemma 12B
-                  </span>
-                  {currentPageInfo?.refined_text && (
+              {/* 2. Refined Text Card with Provider Pill & Reasoning */}
+              <div className="space-y-2">
+                {/* Provider Header & API Key Settings */}
+                <div className="flex items-center justify-between gap-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] font-bold text-fuchsia-300 uppercase tracking-wider flex items-center gap-1">
+                      <Sparkles className="w-3 h-3 text-fuchsia-400" />
+                      OpenRouter Nemotron 550B
+                    </span>
+                  </div>
+
+                  {/* API Key Toggle Button */}
+                  <div className="flex items-center bg-secondary/60 p-0.5 rounded-lg border border-border/40 text-[10px]">
                     <button
-                      onClick={() => handleCopy(currentPageInfo.refined_text!, true)}
-                      className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
-                      title="คัดลอกข้อความที่ขัดเกลาแล้ว"
+                      type="button"
+                      onClick={() => setShowKeyInput(!showKeyInput)}
+                      className={`flex items-center gap-1 px-2 py-0.5 rounded-md font-medium transition-all ${
+                        showKeyInput ? "bg-fuchsia-600/30 text-fuchsia-300" : "text-muted-foreground hover:text-foreground"
+                      }`}
+                      title="ตั้งค่า OpenRouter API Key"
                     >
-                      {copiedRefined ? (
-                        <>
-                          <Check className="w-3 h-3 text-emerald-400" />
-                          <span className="text-emerald-400">คัดลอกแล้ว</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3 h-3" />
-                          <span>คัดลอก</span>
-                        </>
-                      )}
+                      <Settings2 className="w-2.5 h-2.5" />
+                      <span>API Key</span>
                     </button>
-                  )}
+                  </div>
                 </div>
 
-                {currentPageInfo?.refined_text ? (
-                  <div className="p-3.5 rounded-xl bg-gradient-to-br from-fuchsia-950/25 via-fuchsia-900/10 to-card border border-fuchsia-500/35 text-xs leading-relaxed text-fuchsia-50 font-sans whitespace-pre-wrap select-text shadow-sm max-h-72 overflow-y-auto">
-                    {currentPageInfo.refined_text}
+                {/* API Key Configuration Dropdown */}
+                {showKeyInput && (
+                  <div className="p-2.5 rounded-xl bg-secondary/80 border border-border/70 space-y-1.5 text-xs">
+                    <label className="text-[10px] font-semibold text-muted-foreground">OpenRouter API Key (Optional)</label>
+                    <input
+                      type="password"
+                      value={openRouterKey}
+                      onChange={(e) => {
+                        setOpenRouterKey(e.target.value);
+                        localStorage.setItem("openrouter_api_key", e.target.value);
+                      }}
+                      placeholder="sk-or-v1-..."
+                      className="w-full px-2.5 py-1 text-xs rounded-md bg-background border border-border outline-none focus:border-fuchsia-500 font-mono"
+                    />
+                    <p className="text-[10px] text-muted-foreground">
+                      หากไม่ระบุ ระบบจะใช้อ่านจาก .env (OPENROUTER_API_KEY)
+                    </p>
+                  </div>
+                )}
+
+                {/* Refined Text Body */}
+                {streamingContent || currentPageInfo?.refined_text ? (
+                  <div className="space-y-2">
+                    <div className="relative p-3.5 rounded-xl bg-gradient-to-br from-fuchsia-950/25 via-fuchsia-900/10 to-card border border-fuchsia-500/35 text-xs leading-relaxed text-fuchsia-50 font-sans whitespace-pre-wrap select-text shadow-sm max-h-72 overflow-y-auto">
+                      {streamingContent || currentPageInfo?.refined_text}
+                      {isRefiningPage && streamingContent && (
+                        <span className="inline-block w-1.5 h-3.5 ml-1 bg-fuchsia-400 animate-pulse" />
+                      )}
+                    </div>
+
+                    <div className="flex items-center justify-end">
+                      {currentPageInfo?.refined_text && (
+                        <button
+                          onClick={() => handleCopy(currentPageInfo.refined_text!, true)}
+                          className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors cursor-pointer"
+                          title="คัดลอกข้อความที่ขัดเกลาแล้ว"
+                        >
+                          {copiedRefined ? (
+                            <>
+                              <Check className="w-3 h-3 text-emerald-400" />
+                              <span className="text-emerald-400">คัดลอกแล้ว</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3 h-3" />
+                              <span>คัดลอก</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ) : (
                   <div className="p-5 rounded-xl bg-secondary/30 border border-dashed border-border/80 text-center space-y-2">
@@ -987,8 +1076,63 @@ export default function ReaderPage() {
                     </div>
                     <p className="text-xs font-semibold text-foreground">ยังไม่ได้ขัดเกลาสำนวนหน้านี้</p>
                     <p className="text-[11px] text-muted-foreground leading-relaxed">
-                      กดปุ่มขัดเกลาด้านล่างเพื่อส่งบทสนทนานี้ให้ TranslateGemma ปรับสำนวนไทยให้อ่านลื่นและมีอรรถรสเหมือนมังงะแปลไทยแท้
+                      กดปุ่มขัดเกลาด้านล่างเพื่อส่งบทสนทนานี้ให้ AI ปรับสำนวนไทยให้อ่านลื่นและมีอรรถรสเหมือนมังงะแปลไทยแท้
                     </p>
+                  </div>
+                )}
+
+                {/* Collapsible Reasoning Process Accordion */}
+                {(currentPageInfo?.reasoning_details || streamingReasoning) && (
+                  <div className="rounded-xl border border-violet-500/25 bg-violet-950/20 overflow-hidden text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setIsReasoningExpanded(!isReasoningExpanded)}
+                      className="w-full px-3 py-2 flex items-center justify-between text-[11px] font-semibold text-violet-300 hover:bg-violet-900/30 transition-colors cursor-pointer"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <Brain className="w-3.5 h-3.5 text-violet-400" />
+                        💭 วิเคราะห์บทสนทนา (Reasoning Process)
+                      </span>
+                      {isReasoningExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                    </button>
+                    {isReasoningExpanded && (
+                      <div className="p-3 border-t border-violet-500/20 bg-black/35 text-[11px] text-violet-200/90 leading-relaxed font-mono whitespace-pre-wrap max-h-48 overflow-y-auto select-text">
+                        {streamingReasoning || (
+                          typeof currentPageInfo?.reasoning_details === "string"
+                            ? currentPageInfo.reasoning_details
+                            : JSON.stringify(currentPageInfo?.reasoning_details, null, 2)
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Multi-turn Interactive Touch-up Input */}
+                {currentPageInfo?.refined_text && !isRefiningPage && (
+                  <div className="pt-2 border-t border-border/40">
+                    <div className="flex items-center gap-1.5 bg-secondary/50 rounded-lg p-1 border border-border/50">
+                      <input
+                        type="text"
+                        value={userTouchupPrompt}
+                        onChange={(e) => setUserTouchupPrompt(e.target.value)}
+                        placeholder="สั่งเกลาเพิ่มเติม เช่น: ปรับให้ดูห้าวขึ้น..."
+                        className="flex-1 bg-transparent px-2 py-1 text-[11px] outline-none placeholder:text-muted-foreground/60"
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && userTouchupPrompt.trim()) {
+                            handleRefineCurrentPage(true, userTouchupPrompt);
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => userTouchupPrompt.trim() && handleRefineCurrentPage(true, userTouchupPrompt)}
+                        disabled={!userTouchupPrompt.trim()}
+                        className="p-1 rounded-md bg-fuchsia-600/80 hover:bg-fuchsia-600 text-white disabled:opacity-30 transition-all cursor-pointer"
+                        title="ส่งคำสั่งปรับแก้ต่อยอด"
+                      >
+                        <Send className="w-3 h-3" />
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -1004,7 +1148,7 @@ export default function ReaderPage() {
                 title={
                   !currentPageInfo?.original_text
                     ? "หน้านี้ไม่มีข้อความต้นฉบับจาก Lens"
-                    : "เริ่มขัดเกลาสำนวนหน้านี้ด้วย Ollama TranslateGemma"
+                    : "เริ่มขัดเกลาสำนวนหน้านี้ด้วย OpenRouter Nemotron"
                 }
               >
                 {isRefiningPage ? (
@@ -1033,6 +1177,7 @@ export default function ReaderPage() {
           </aside>
         )}
       </div>
+
 
       {/* 3. Bottom Scrubber & Quick Slider (For Page-by-Page & Double-Page) */}
       <div className="px-6 py-2.5 bg-card/85 backdrop-blur-2xl border-t border-border/80 flex items-center justify-between gap-4 z-40 shrink-0">
@@ -1087,10 +1232,10 @@ export default function ReaderPage() {
             {currentPageInfo?.refined_text ? (
               <span
                 className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30"
-                title={`หน้านี้ผ่านการขัดเกลาสำนวนด้วย Ollama แล้ว (ทั้งตอนเกลาแล้ว ${refinedPagesCount}/${totalPages} หน้า หรือ ${chapterRefinePercent}%)`}
+                title={`หน้านี้ผ่านการขัดเกลาสำนวนด้วย OpenRouter AI แล้ว (ทั้งตอนเกลาแล้ว ${refinedPagesCount}/${totalPages} หน้า หรือ ${chapterRefinePercent}%)`}
               >
                 <Sparkles className="w-2.5 h-2.5 text-fuchsia-400" />
-                <span>Ollama Refined ({chapterRefinePercent}%)</span>
+                <span>AI Refined ({chapterRefinePercent}%)</span>
               </span>
             ) : currentPageInfo?.has_translation ? (
               <span

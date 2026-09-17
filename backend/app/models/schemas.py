@@ -60,19 +60,29 @@ class PageInfo(BaseModel):
     has_translation: bool = False
     original_text: str | None = None
     refined_text: str | None = None
+    reasoning_details: Any | None = None
+    provider: str | None = None
 
 
 class RefineRequest(BaseModel):
     force: bool = False
+    provider: str | None = "openrouter"
+    api_key: str | None = None
+    model: str | None = None
+    user_instruction: str | None = None
 
 
 class RefinePageResponse(BaseModel):
     page: int
     original_text: str = ""
     refined_text: str = ""
+    reasoning_details: Any | None = None
+    provider: str = "openrouter"
     model: str = ""
     cached: bool = False
     error: str | None = None
+    history: list[dict] | None = None
+
 
 
 class TouchupRequest(BaseModel):
